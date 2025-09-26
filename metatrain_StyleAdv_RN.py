@@ -72,10 +72,10 @@ def record_test_result_bscdfsl(params):
   print('epoch', epoch_id, 'ChestX:', 'ISIC:', 'EuroSAT:', 'CropDisease', file = acc_file)
   name = params.name
   n_shot = params.n_shot
-  test_bestmodel_bscdfsl(acc_file, name, 'ChestX', n_shot, epoch_id)
-  test_bestmodel_bscdfsl(acc_file, name, 'ISIC', n_shot, epoch_id)
+  # test_bestmodel_bscdfsl(acc_file, name, 'ChestX', n_shot, epoch_id)
+  # test_bestmodel_bscdfsl(acc_file, name, 'ISIC', n_shot, epoch_id)
   test_bestmodel_bscdfsl(acc_file, name, 'EuroSAT', n_shot, epoch_id)
-  test_bestmodel_bscdfsl(acc_file, name, 'CropDisease', n_shot, epoch_id)
+  # test_bestmodel_bscdfsl(acc_file, name, 'CropDisease', n_shot, epoch_id)
 
   acc_file.close()
   return
