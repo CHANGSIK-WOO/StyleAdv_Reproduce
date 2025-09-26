@@ -1,12 +1,18 @@
 # This code is modified from https://github.com/facebookresearch/low-shot-shrink-hallucinate
 import json
 import torch
+import os
 import random
 from PIL import Image
 import torchvision.transforms as transforms
 import data.additional_transforms as add_transforms
 from data.dataset import SimpleDataset, SetDataset, MultiSetDataset, EpisodicBatchSampler, MultiEpisodicBatchSampler, RandomLabeledTargetDataset
 from abc import abstractmethod
+
+import sys
+sys.path.append("../")
+#from configs import *
+from config_bscdfsl_dir import *
 
 class TransformLoader:
   def __init__(self, image_size,
@@ -66,7 +72,7 @@ class LabeledTargetDataset:
        img_label = []
      
        for idx in selected_idx_list:
-           image_path = self.meta['image_names'][idx]
+           image_path = os.path.join(DATA_ROOT, self.meta['image_names'][idx])
            image_label = self.meta['image_labels'][idx]
            img = Image.open(image_path).convert('RGB')
            img = self.transform(img)

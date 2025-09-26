@@ -17,7 +17,7 @@ ImageFile.LOAD_TRUNCATED_IMAGES = True
 import sys
 sys.path.append("../")
 #from configs import *
-from config_bscdfsl_dir import * 
+from config_bscdfsl_dir import *
 
 identity = lambda x:x
 class SimpleDataset:

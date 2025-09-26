@@ -1,10 +1,10 @@
 # Configuration for BS-CDFSL benchmark datasets
 
 # Base directory for datasets
-DATA_ROOT = "./data/filelists"
+DATA_ROOT = "/data/changsik/cdfsl-benchmark/filelists"
 
 # Individual dataset paths
 ISIC_path = f"{DATA_ROOT}/ISIC2018"
 EuroSAT_path = f"{DATA_ROOT}/EuroSAT/2750"
-CropDisease_path = f"{DATA_ROOT}/CropDisease"
+CropDisease_path = f"{DATA_ROOT}/CropDisease/dataset"
 ChestX_path = f"{DATA_ROOT}/ChestX-Ray8"

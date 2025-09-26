@@ -19,6 +19,7 @@ sys.path.append("../")
 #from configs import *
 from config_bscdfsl_dir import *
 
+
 identity = lambda x:x
 class SimpleDataset:
     def __init__(self, transform, target_transform=identity):

@@ -65,7 +65,7 @@ def record_test_result(params):
 
 
 def record_test_result_bscdfsl(params):
-  print('hhhhhhh testing for bscdfsl')
+  print('testing for bscdfsl')
   acc_file_path = os.path.join(params.checkpoint_dir, 'acc_bscdfsl.txt')
   acc_file = open(acc_file_path,'w')
   epoch_id = -1
@@ -150,8 +150,9 @@ if __name__=='__main__':
   end=time.clock()
   print('Running time: %s Seconds: %s Min: %s Min per epoch'%(end-start, (end-start)/60, (end-start)/60/params.stop_epoch))
 
-  # testing
-  record_test_result(params)
+  # # testing
+  # record_test_result(params) : [25.09.25] de-activate
+
   # testing bscdfsl
   record_test_result_bscdfsl(params)
 

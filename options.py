@@ -6,8 +6,9 @@ import argparse
 
 def parse_args(script):
   parser = argparse.ArgumentParser(description= 'few-shot script %s' %(script))
-  parser.add_argument('--dataset', default='multi', help='miniImagenet/cub/cars/places/plantae, specify multi for training with multiple domains')
-  parser.add_argument('--testset', default='cub', help='cub/cars/places/plantae, valid only when dataset=multi')
+  #parser.add_argument('--dataset', default='multi', help='miniImagenet/cub/cars/places/plantae, specify multi for training with multiple domains')
+  parser.add_argument('--dataset', default='multi', help='miniImagenet, specify multi for training with multiple domains')
+  parser.add_argument('--testset', default='cub', help='/CropDisease/EuroSAT/ChestX/ISIC, valid only when dataset=multi')
   parser.add_argument('--model', default='ResNet10', help='model: Conv{4|6} / ResNet{10|18|34}') # we use ResNet10 in the paper
   parser.add_argument('--method', default='baseline',   help='baseline/baseline++/protonet/matchingnet/relationnet{_softmax}/gnnnet')
   parser.add_argument('--train_n_way' , default=5, type=int,  help='class num to classify for training')
@@ -17,7 +18,8 @@ def parse_args(script):
   parser.add_argument('--name'        , default='tmp', type=str, help='')
   parser.add_argument('--save_dir'    , default='./output', type=str, help='')
   #parser.add_argument('--data_dir'    , default='./filelists', type=str, help='')
-  parser.add_argument('--data_dir'    , default='/share/test/lovelyqian/CROSS-DOMAIN-FSL-DATASETS', type=str, help='')
+  #parser.add_argument('--data_dir'    , default='/share/test/lovelyqian/CROSS-DOMAIN-FSL-DATASETS', type=str, help='')
+  parser.add_argument('--data_dir', default='/data/changsik/cdfsl-benchmark/filelists', type=str, help='')
 
   # for finetuning
   parser.add_argument('--finetune_epoch', default=50, type=int, help='')
