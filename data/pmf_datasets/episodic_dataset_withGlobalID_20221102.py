@@ -113,6 +113,7 @@ class EpisodeDataset_withGlobalID(data.Dataset):
         super().__init__()
 
         self.imgDir = imgDir
+        print(f"imgDir : {imgDir}")
         self.clsList = os.listdir(imgDir)
         self.nCls = nCls
         self.nSupport = nSupport
@@ -124,7 +125,7 @@ class EpisodeDataset_withGlobalID(data.Dataset):
         intType = torch.LongTensor
 
         # for global id
-        f = './data/filelists/Mini-ImageNet/base.json'
+        f = '/data/changsik/cdfsl-benchmark/filelists/miniImagenet/all.json'
         self.meta = json.load(open(f, 'r'))
         self.meta_path = self.meta['image_names']
         self.meta_clsID = self.meta['image_labels'] 

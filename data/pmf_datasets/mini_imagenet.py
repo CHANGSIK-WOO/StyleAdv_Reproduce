@@ -27,13 +27,19 @@ def dataset_setting(nSupport, img_size=80):
 
     inputW, inputH, nbCls = img_size, img_size, 64
 
-    trainDir = './data/filelists/Mini-ImageNet/train/'
+    # trainDir = './data/filelists/Mini-ImageNet/train/'
     #trainDir = '/share/test/lovelyqian/CROSS-DOMAIN-FSL-DATASETS/miniImagenet/source/mini_imagenet_full_size/train/'
-    valDir = './data/filelists/Mini-ImageNet/val/'
-    #valDir = '/share/test/lovelyqian/CROSS-DOMAIN-FSL-DATASETS/miniImagenet/source/mini_imagenet_full_size/val/'
-    testDir = './data/filelists/Mini-ImageNet/test/'
-    #testDir = '/share/test/lovelyqian/CROSS-DOMAIN-FSL-DATASETS/miniImagenet/source/mini_imagenet_full_size/test/'
+    trainDir = "/data/changsik/cdfsl-benchmark/filelists/miniImagenet/miniImagenet_extracted"
+    # valDir = './data/filelists/Mini-ImageNet/val/'
+    # valDir = '/share/test/lovelyqian/CROSS-DOMAIN-FSL-DATASETS/miniImagenet/source/mini_imagenet_full_size/val/'
+    valDir = "/data/changsik/cdfsl-benchmark/filelists/miniImagenet/miniImagenet_extracted"
+    # testDir = './data/filelists/Mini-ImageNet/test/'
+    # testDir = '/share/test/lovelyqian/CROSS-DOMAIN-FSL-DATASETS/miniImagenet/source/mini_imagenet_full_size/test/'
+    testDir = "/data/changsik/cdfsl-benchmark/filelists/miniImagenet/miniImagenet_extracted"
+
     episodeJson = './data/filelists/Mini-ImageNet/val1000Episode_5_way_1_shot.json' if nSupport == 1 \
             else './data/filelists/Mini-ImageNet/val1000Episode_5_way_5_shot.json'
 
-    return trainTransform, valTransform, inputW, inputH, trainDir, valDir, testDir, episodeJson, nbCls
+    # return trainTransform, valTransform, inputW, inputH, trainDir, valDir, testDir, episodeJson, nbCls
+    return trainTransform, valTransform, inputW, inputH, trainDir, valDir, testDir, nbCls
+
