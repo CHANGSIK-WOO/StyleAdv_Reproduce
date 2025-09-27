@@ -16,25 +16,56 @@ from timm.scheduler import create_scheduler
 from timm.optim import create_optimizer
 from timm.utils import NativeScaler, get_state_dict, ModelEma
 
-#from models.pmf_engine import train_one_epoch, evaluate
-#from models.pmf_engine_styleAdv_20221102 import train_one_epoch_styleAdv, evaluate  
-#from methods.pmf_engine_styleAdv_20221102 import train_one_epoch_styleAdv, evaluate  
 from methods.engine_StyleAdv_ViT import train_one_epoch_styleAdv, evaluate
-#import pmf_utils.deit_util as utils
 import utils.deit_util as utils
-#from pmf_datasets import get_loaders
-#from pmf_datasets import get_loaders_withGlobalID
 from data.pmf_datasets import get_loaders_withGlobalID
-#from pmf_utils.args import get_args_parser
 from utils.args import get_args_parser
-#from models import get_model
-#from methods.cvpr2023_load_models_20221102 import get_model
 from methods.load_ViT_models import get_model
 
-#lr_classifier = 5e-5
-#lr_classifier = 0.01
+# BSCDFSL 테스트를 위한 import 추가
+from options import parse_args
+from test_function_bscdfsl_benchmark_ViT import test_bestmodel_bscdfsl_ViT
+import os
+
 lr_classifier = 0.001
-#lr_classifier = 0.0001
+
+
+def run_bscdfsl_test(args, model_path):
+    """BSCDFSL 테스트 실행"""
+    print('\n--- Starting BSCDFSL benchmark testing ---')
+    print('testing for bscdfsl with ViT model')
+
+    # args를 options.py 스타일의 params로 변환
+    class MockParams:
+        def __init__(self, args, model_path):
+            self.name = os.path.basename(args.output_dir)
+            self.save_dir = str(Path(args.output_dir).parent.parent)  # output 디렉토리의 parent의 parent
+            self.checkpoint_dir = str(Path(model_path).parent)
+            self.data_dir = '/data/changsik/cdfsl-benchmark/filelists'
+            self.n_shot = args.nSupport
+            self.test_n_way = 5
+            self.split = 'novel'
+            self.save_epoch = -1  # best model
+
+    params = MockParams(args, model_path)
+
+    # 각 데이터셋에 대해 테스트 실행
+    acc_file_path = os.path.join(params.checkpoint_dir, 'acc_bscdfsl.txt')
+    with open(acc_file_path, 'w') as acc_file:
+        epoch_id = -1
+        print('epoch', epoch_id, 'ChestX:', 'ISIC:', 'EuroSAT:', 'CropDisease', file=acc_file)
+
+        datasets = ['ChestX', 'ISIC', 'EuroSAT', 'CropDisease']
+        for dataset in datasets:
+            try:
+                print(f'Testing on {dataset}...')
+                test_bestmodel_bscdfsl_ViT(acc_file, params.name, dataset, params.n_shot, epoch_id)
+            except Exception as e:
+                print(f'Error testing {dataset}: {e}')
+                print(f'  {dataset} test failed: {e}', file=acc_file)
+
+    print('BSCDFSL testing completed!')
+
 
 def main(args):
     utils.init_distributed_mode(args)
@@ -76,12 +107,10 @@ def main(args):
     ##############################################
     # Model
     print(f"Creating model: ProtoNet {args.arch}")
-    model = get_model(backbone = 'vit_small', classifier='protonet', styleAdv=True)
-    #model = get_model(args)
+    model = get_model(backbone='vit_small', classifier='protonet', styleAdv=True)
     model.to(device)
 
-
-    model_ema = None # (by default OFF)
+    model_ema = None  # (by default OFF)
     if args.model_ema:
         # Important to create EMA model after cuda(), DP wrapper, and AMP but before SyncBN and DDP wrapper
         model_ema = ModelEma(
@@ -101,27 +130,18 @@ def main(args):
     ##############################################
     # Optimizer & scheduler & criterion
     if args.fp16:
-        scale = 1 / 8 # the default lr is for 8 GPUs
+        scale = 1 / 8  # the default lr is for 8 GPUs
         linear_scaled_lr = args.lr * utils.get_world_size() * scale
         args.lr = linear_scaled_lr
 
     loss_scaler = NativeScaler() if args.fp16 else None
 
-    #optimizer = create_optimizer(args, model_without_ddp)
-    '''
     optimizer = torch.optim.SGD(
-        [p for p in model_without_ddp.parameters() if p.requires_grad],
+        [{'params': p for p in model_without_ddp.feature.parameters() if p.requires_grad},
+         {'params': model_without_ddp.classifier.parameters(), 'lr': lr_classifier}],
         args.lr,
         momentum=args.momentum,
-        weight_decay=0, # no weight decay for fine-tuning
-    )
-    '''
-    optimizer = torch.optim.SGD(
-        [ {'params': p for p in model_without_ddp.feature.parameters() if p.requires_grad},
-          {'params': model_without_ddp.classifier.parameters(), 'lr': lr_classifier}],
-        args.lr,
-        momentum=args.momentum,
-        weight_decay=0, # no weight decay for fine-tuning
+        weight_decay=0,  # no weight decay for fine-tuning
     )
     lr_scheduler, _ = create_scheduler(args, optimizer)
 
@@ -155,10 +175,9 @@ def main(args):
 
         print(f'Resume from {args.resume} at epoch {args.start_epoch}.')
 
-
     ##############################################
     # Test
-    test_stats = evaluate(data_loader_val, model, criterion, device, args.seed+10000)
+    test_stats = evaluate(data_loader_val, model, criterion, device, args.seed + 10000)
     print(f"Accuracy of the network on dataset_val: {test_stats['acc1']:.1f}%")
     if args.output_dir and utils.is_main_process():
         test_stats['epoch'] = -1
@@ -177,7 +196,6 @@ def main(args):
 
     print(f"Start training for {args.epochs} epochs")
     start_time = time.time()
-    #max_accuracy = test_stats['acc1']
     max_accuracy = 0.0
 
     for epoch in range(args.start_epoch, args.epochs):
@@ -190,7 +208,7 @@ def main(args):
 
         lr_scheduler.step(epoch)
 
-        test_stats = evaluate(data_loader_val, model, criterion, device, args.seed+10000)
+        test_stats = evaluate(data_loader_val, model, criterion, device, args.seed + 10000)
 
         log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
                      **{f'test_{k}': v for k, v in test_stats.items()},
@@ -213,7 +231,7 @@ def main(args):
                 utils.save_on_master(state_dict, checkpoint_path)
 
                 if test_stats["acc1"] <= max_accuracy:
-                    break # do not save best.pth
+                    break  # do not save best.pth
 
         print(f"Accuracy of the network on dataset_val: {test_stats['acc1']:.1f}%")
         max_accuracy = max(max_accuracy, test_stats["acc1"])
@@ -233,7 +251,14 @@ def main(args):
         import tables
         tables.file._open_files.close_all()
 
-
+    ##############################################
+    # BSCDFSL 테스트 실행 (학습 완료 후)
+    if utils.is_main_process():
+        best_model_path = output_dir / 'best.pth'
+        if best_model_path.exists():
+            run_bscdfsl_test(args, str(best_model_path))
+        else:
+            print("Best model not found, skipping BSCDFSL test")
 
 
 if __name__ == '__main__':
