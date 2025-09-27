@@ -219,7 +219,7 @@ def save_on_master(*args, **kwargs):
 
 
 def init_distributed_mode(args):
-    if args.device != 'cuda':
+    if args.device == 'cuda':
         print('Not using distributed mode')
         args.distributed = False
         return

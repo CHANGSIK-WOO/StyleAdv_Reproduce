@@ -14,5 +14,5 @@
 set -euo pipefail
 
 echo "Starting Sbatch metatrain_StyleAdv_ViT_5way_1shot"
-python metatrain_StyleAdv_ViT_with_test.py --output output/ViT_5WAY_1SHOTS --dataset mini_imagenet --epoch 20 --lr 5e-5 --arch dino_small_patch16 --device cuda --nSupport 1 --fp16
+python metatrain_StyleAdv_ViT.py --output output/ViT_5WAY_1SHOTS --dataset mini_imagenet --epoch 20 --lr 5e-5 --arch dino_small_patch16 --device cuda:0 --nSupport 1 --fp16
 echo "Finish Sbatch metatrain_StyleAdv_ViT_5way_1shot"
