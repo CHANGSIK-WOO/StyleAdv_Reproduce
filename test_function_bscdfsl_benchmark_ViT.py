@@ -9,7 +9,7 @@ from data import ISIC_few_shot, EuroSAT_few_shot, CropDisease_few_shot, Chest_fe
 from methods.load_ViT_models import load_ViTsmall
 from methods.protonet import ProtoNet
 from methods.StyleAdv_ViT_meta_template import StyleAdvViT
-from options import parse_args, get_best_file, get_assigned_file
+from options import get_best_file, get_assigned_file
 
 
 # extract and save image features
@@ -66,6 +66,9 @@ def test_bestmodel_bscdfsl_ViT(acc_file, name, dataset, n_shot, save_epoch=-1):
             self.save_dir = './output'
             self.test_n_way = 5
             self.split = 'novel'
+            # 실제 모델 경로 설정
+            self.checkpoint_dir = f'./output/{name}'
+            self.model_path = f'./output/{name}/best.pth'
 
     params = TestParams()
     print(
@@ -103,11 +106,10 @@ def test_bestmodel_bscdfsl_ViT(acc_file, name, dataset, n_shot, save_epoch=-1):
 
     print('  build feature encoder')
     # feature encoder - ViT 백본 사용
-    checkpoint_dir = '%s/checkpoints/%s' % (params.save_dir, params.name)
-    if params.save_epoch != -1:
-        modelfile = get_assigned_file(checkpoint_dir, params.save_epoch)
-    else:
-        modelfile = get_best_file(checkpoint_dir)
+    modelfile = params.model_path
+    if not os.path.exists(modelfile):
+        print(f"Model file not found: {modelfile}")
+        raise FileNotFoundError(f"Model file not found: {modelfile}")
 
     # ViT 모델 로드
     vit_backbone = load_ViTsmall()
@@ -115,12 +117,21 @@ def test_bestmodel_bscdfsl_ViT(acc_file, name, dataset, n_shot, save_epoch=-1):
 
     # 체크포인트에서 ViT 백본 가중치 로드
     tmp = torch.load(modelfile)
-    try:
-        state = tmp['state']
-    except KeyError:
-        state = tmp['model_state']
-    except:
-        raise
+
+    # 키 확인 및 적절한 state 추출
+    print(f'Available keys in checkpoint: {list(tmp.keys())}')
+
+    # 다양한 키 패턴 시도
+    state = None
+    possible_keys = ['model', 'state', 'model_state']
+    for key in possible_keys:
+        if key in tmp:
+            state = tmp[key]
+            print(f'Using checkpoint key: {key}')
+            break
+
+    if state is None:
+        raise KeyError(f"No valid model state found in checkpoint. Available keys: {list(tmp.keys())}")
 
     state_keys = list(state.keys())
     print('state_keys:', len(state_keys))
@@ -139,10 +150,10 @@ def test_bestmodel_bscdfsl_ViT(acc_file, name, dataset, n_shot, save_epoch=-1):
     # save feature file
     print('  extract and save features...')
     if params.save_epoch != -1:
-        featurefile = os.path.join(checkpoint_dir.replace("checkpoints", "features"),
+        featurefile = os.path.join(params.checkpoint_dir.replace("checkpoints", "features"),
                                    split + "_" + str(params.save_epoch) + ".hdf5")
     else:
-        featurefile = os.path.join(checkpoint_dir.replace("checkpoints", "features"), split + ".hdf5")
+        featurefile = os.path.join(params.checkpoint_dir.replace("checkpoints", "features"), split + ".hdf5")
     dirname = os.path.dirname(featurefile)
     if not os.path.isdir(dirname):
         os.makedirs(dirname)
@@ -161,25 +172,31 @@ def test_bestmodel_bscdfsl_ViT(acc_file, name, dataset, n_shot, save_epoch=-1):
     model.eval()
 
     # load model
-    checkpoint_dir = '%s/checkpoints/%s' % (params.save_dir, params.name)
-    if params.save_epoch != -1:
-        modelfile = get_assigned_file(checkpoint_dir, params.save_epoch)
-    else:
-        modelfile = get_best_file(checkpoint_dir)
-    if modelfile is not None:
+    modelfile = params.model_path
+    if modelfile is not None and os.path.exists(modelfile):
         tmp = torch.load(modelfile)
-        try:
-            model.load_state_dict(tmp['state'])
-        except RuntimeError:
-            print('warning! RuntimeError when load_state_dict()!')
-            model.load_state_dict(tmp['state'], strict=False)
-        except KeyError:
-            for k in tmp['model_state']:  ##### revise latter
-                if 'running' in k:
-                    tmp['model_state'][k] = tmp['model_state'][k].squeeze()
-            model.load_state_dict(tmp['model_state'], strict=False)
-        except:
-            raise
+
+        # 모델 state 로드를 위한 키 확인
+        print(f'Loading model from checkpoint keys: {list(tmp.keys())}')
+
+        # 가능한 키들로 시도
+        model_loaded = False
+        possible_model_keys = ['model', 'state', 'model_state']
+
+        for key in possible_model_keys:
+            if key in tmp:
+                try:
+                    model.load_state_dict(tmp[key], strict=False)
+                    print(f'Successfully loaded model using key: {key}')
+                    model_loaded = True
+                    break
+                except Exception as e:
+                    print(f'Failed to load model with key {key}: {e}')
+                    continue
+
+        if not model_loaded:
+            raise KeyError(
+                f"Could not load model from any of the keys: {possible_model_keys}. Available keys: {list(tmp.keys())}")
 
     # load feature file
     print('  load saved feature file')

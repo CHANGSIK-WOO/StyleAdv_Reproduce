@@ -37,6 +37,8 @@ def parse_args(script):
     parser.add_argument('--resume'      , default='', type=str, help='continue from previous trained model with largest epoch')
     parser.add_argument('--resume_epoch', default=-1, type=int, help='')
     parser.add_argument('--warmup'      , default='gg3b0', type=str, help='continue from baseline, neglected if resume is true')
+    parser.add_argument('--finetune_LR' , default='0.005', type=str, help='finetune')
+
   elif script == 'test':
     parser.add_argument('--split'       , default='novel', help='base/val/novel')
     parser.add_argument('--save_epoch', default=400, type=int,help ='load the model trained in x epoch, use the best model if x is -1')

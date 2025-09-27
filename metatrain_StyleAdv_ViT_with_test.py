@@ -1,268 +1,230 @@
-import sys
-import datetime
+import torch
+import os
+import h5py
 import random
 import numpy as np
-import time
-import torch
-import torch.backends.cudnn as cudnn
-import json
-
-from pathlib import Path
-from torch.utils.tensorboard import SummaryWriter
-
-from timm.data import Mixup
-from timm.loss import LabelSmoothingCrossEntropy, SoftTargetCrossEntropy
-from timm.scheduler import create_scheduler
-from timm.optim import create_optimizer
-from timm.utils import NativeScaler, get_state_dict, ModelEma
-
-from methods.engine_StyleAdv_ViT import train_one_epoch_styleAdv, evaluate
-import utils.deit_util as utils
-from data.pmf_datasets import get_loaders_withGlobalID
-from utils.args import get_args_parser
-from methods.load_ViT_models import get_model
-
-# BSCDFSL 테스트를 위한 import 추가
-from options import parse_args
-from test_function_bscdfsl_benchmark_ViT import test_bestmodel_bscdfsl_ViT
-import os
-
-lr_classifier = 0.001
+import data.feature_loader as feat_loader
+from data.datamgr import SimpleDataManager
+from data import ISIC_few_shot, EuroSAT_few_shot, CropDisease_few_shot, Chest_few_shot
+from methods.load_ViT_models import load_ViTsmall
+from methods.protonet import ProtoNet
+from methods.StyleAdv_ViT_meta_template import StyleAdvViT
+from options import get_best_file, get_assigned_file
 
 
-def run_bscdfsl_test(args, model_path):
-    """BSCDFSL 테스트 실행"""
-    print('\n--- Starting BSCDFSL benchmark testing ---')
-    print('testing for bscdfsl with ViT model')
+# extract and save image features
+def save_features(model, data_loader, featurefile):
+    f = h5py.File(featurefile, 'w')
+    max_count = len(data_loader) * data_loader.batch_size
+    all_labels = f.create_dataset('all_labels', (max_count,), dtype='i')
+    all_feats = None
+    count = 0
+    for i, (x, y) in enumerate(data_loader):
+        if (i % 10) == 0:
+            print('    {:d}/{:d}'.format(i, len(data_loader)))
+        x = x.cuda()
+        feats = model(x)
+        if all_feats is None:
+            all_feats = f.create_dataset('all_feats', [max_count] + list(feats.size()[1:]), dtype='f')
+        all_feats[count:count + feats.size(0)] = feats.data.cpu().numpy()
+        all_labels[count:count + feats.size(0)] = y.cpu().numpy()
+        count = count + feats.size(0)
 
-    # args를 options.py 스타일의 params로 변환
-    class MockParams:
-        def __init__(self, args, model_path):
-            self.name = os.path.basename(args.output_dir)
-            self.save_dir = str(Path(args.output_dir).parent.parent)  # output 디렉토리의 parent의 parent
-            self.checkpoint_dir = str(Path(model_path).parent)
+    count_var = f.create_dataset('count', (1,), dtype='i')
+    count_var[0] = count
+    f.close()
+
+
+# evaluate using features
+def feature_evaluation(cl_data_file, model, n_way=5, n_support=5, n_query=15):
+    class_list = cl_data_file.keys()
+    select_class = random.sample(class_list, n_way)
+    z_all = []
+    for cl in select_class:
+        img_feat = cl_data_file[cl]
+        perm_ids = np.random.permutation(len(img_feat)).tolist()
+        z_all.append([np.squeeze(img_feat[perm_ids[i]]) for i in range(n_support + n_query)])
+    z_all = torch.from_numpy(np.array(z_all))
+
+    model.n_query = n_query
+    scores = model.set_forward(z_all, is_feature=True)
+    pred = scores.data.cpu().numpy().argmax(axis=1)
+    y = np.repeat(range(n_way), n_query)
+    acc = np.mean(pred == y) * 100
+    return acc
+
+
+def test_bestmodel_bscdfsl_ViT(acc_file, name, dataset, n_shot, save_epoch=-1):
+    # 직접 params 객체 생성 (parse_args 사용하지 않음)
+    class TestParams:
+        def __init__(self):
+            self.n_shot = n_shot
+            self.dataset = dataset
+            self.name = name
+            self.save_epoch = save_epoch  # -1 = best
             self.data_dir = '/data/changsik/cdfsl-benchmark/filelists'
-            self.n_shot = args.nSupport
+            self.save_dir = './output'
             self.test_n_way = 5
             self.split = 'novel'
-            self.save_epoch = -1  # best model
+            # 실제 모델 경로 설정
+            self.checkpoint_dir = f'./output/{name}'
+            self.model_path = f'./output/{name}/best.pth'
 
-    params = MockParams(args, model_path)
+    params = TestParams()
+    print(
+        'Testing! {} shots on {} dataset with {} epochs of {}'.format(params.n_shot, params.dataset, params.save_epoch,
+                                                                      params.name))
+    remove_featurefile = True
 
-    # 각 데이터셋에 대해 테스트 실행
-    acc_file_path = os.path.join(params.checkpoint_dir, 'acc_bscdfsl.txt')
-    with open(acc_file_path, 'w') as acc_file:
-        epoch_id = -1
-        print('epoch', epoch_id, 'ChestX:', 'ISIC:', 'EuroSAT:', 'CropDisease', file=acc_file)
+    print('\nStage 1: saving features')
+    # dataset
+    print('  build dataset')
+    image_size = 224
+    split = params.split
+    if (params.dataset in ["miniImagenet", "cub", "cars", "places", "plantae"]):
+        loadfile = os.path.join(params.data_dir, params.dataset, split + '.json')
+        print('load file:', loadfile)
+        datamgr = SimpleDataManager(image_size, batch_size=64)
+        data_loader = datamgr.get_data_loader(loadfile, aug=False)
 
-        datasets = ['ChestX', 'ISIC', 'EuroSAT', 'CropDisease']
-        for dataset in datasets:
-            try:
-                print(f'Testing on {dataset}...')
-                test_bestmodel_bscdfsl_ViT(acc_file, params.name, dataset, params.n_shot, epoch_id)
-            except Exception as e:
-                print(f'Error testing {dataset}: {e}')
-                print(f'  {dataset} test failed: {e}', file=acc_file)
-
-    print('BSCDFSL testing completed!')
-
-
-def main(args):
-    utils.init_distributed_mode(args)
-
-    print(args)
-    device = torch.device(args.device)
-
-    # fix the seed for reproducibility
-    seed = args.seed + utils.get_rank()
-    args.seed = seed
-    torch.manual_seed(seed)
-    np.random.seed(seed)
-    random.seed(seed)
-
-    cudnn.benchmark = True
-
-    output_dir = Path(args.output_dir)
-    if utils.is_main_process():
-        output_dir.mkdir(parents=True, exist_ok=True)
-        with (output_dir / "log.txt").open("a") as f:
-            f.write(" ".join(sys.argv) + "\n")
-
-    ##############################################
-    # Data loaders
-    num_tasks = utils.get_world_size()
-    global_rank = utils.get_rank()
-    data_loader_train, data_loader_val = get_loaders_withGlobalID(args, num_tasks, global_rank)
-
-    ##############################################
-    # Mixup regularization (by default OFF)
-    mixup_fn = None
-    mixup_active = args.mixup > 0 or args.cutmix > 0. or args.cutmix_minmax is not None
-    if mixup_active:
-        mixup_fn = Mixup(
-            mixup_alpha=args.mixup, cutmix_alpha=args.cutmix, cutmix_minmax=args.cutmix_minmax,
-            prob=args.mixup_prob, switch_prob=args.mixup_switch_prob, mode=args.mixup_mode,
-            label_smoothing=args.smoothing, num_classes=args.nClsEpisode)
-
-    ##############################################
-    # Model
-    print(f"Creating model: ProtoNet {args.arch}")
-    model = get_model(backbone='vit_small', classifier='protonet', styleAdv=True)
-    model.to(device)
-
-    model_ema = None  # (by default OFF)
-    if args.model_ema:
-        # Important to create EMA model after cuda(), DP wrapper, and AMP but before SyncBN and DDP wrapper
-        model_ema = ModelEma(
-            model,
-            decay=args.model_ema_decay,
-            device='cpu' if args.model_ema_force_cpu else '',
-            resume='')
-
-    model_without_ddp = model
-    if args.distributed:
-        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu],
-                                                          find_unused_parameters=args.unused_params)
-        model_without_ddp = model.module
-    n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print('number of params:', n_parameters)
-
-    ##############################################
-    # Optimizer & scheduler & criterion
-    if args.fp16:
-        scale = 1 / 8  # the default lr is for 8 GPUs
-        linear_scaled_lr = args.lr * utils.get_world_size() * scale
-        args.lr = linear_scaled_lr
-
-    loss_scaler = NativeScaler() if args.fp16 else None
-
-    optimizer = torch.optim.SGD(
-        [{'params': p for p in model_without_ddp.feature.parameters() if p.requires_grad},
-         {'params': model_without_ddp.classifier.parameters(), 'lr': lr_classifier}],
-        args.lr,
-        momentum=args.momentum,
-        weight_decay=0,  # no weight decay for fine-tuning
-    )
-    lr_scheduler, _ = create_scheduler(args, optimizer)
-
-    if args.mixup > 0.:
-        # smoothing is handled with mixup label transform
-        criterion = SoftTargetCrossEntropy()
-    elif args.smoothing:
-        criterion = LabelSmoothingCrossEntropy(smoothing=args.smoothing)
     else:
-        criterion = torch.nn.CrossEntropyLoss()
+        if params.dataset in ["ISIC"]:
+            datamgr = ISIC_few_shot.SimpleDataManager(image_size, batch_size=64)
+            data_loader = datamgr.get_data_loader(aug=False)
 
-    ##############################################
-    # Resume training from ckpt (model, optimizer, lr_scheduler, epoch, model_ema, scaler)
-    if args.resume:
-        if args.resume.startswith('https'):
-            checkpoint = torch.hub.load_state_dict_from_url(
-                args.resume, map_location='cpu', check_hash=True)
-        else:
-            checkpoint = torch.load(args.resume, map_location='cpu')
+        elif params.dataset in ["EuroSAT"]:
+            datamgr = EuroSAT_few_shot.SimpleDataManager(image_size, batch_size=64)
+            data_loader = datamgr.get_data_loader(aug=False)
 
-        model_without_ddp.load_state_dict(checkpoint['model'])
+        elif params.dataset in ["CropDisease"]:
+            datamgr = CropDisease_few_shot.SimpleDataManager(image_size, batch_size=64)
+            data_loader = datamgr.get_data_loader(aug=False)
 
-        if not args.eval and 'optimizer' in checkpoint and 'lr_scheduler' in checkpoint and 'epoch' in checkpoint:
-            optimizer.load_state_dict(checkpoint['optimizer'])
-            lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
-            args.start_epoch = checkpoint['epoch'] + 1
-            if args.model_ema:
-                utils._load_checkpoint_for_ema(model_ema, checkpoint['model_ema'])
-            if 'scaler' in checkpoint:
-                loss_scaler.load_state_dict(checkpoint['scaler'])
+        elif params.dataset in ["ChestX"]:
+            datamgr = Chest_few_shot.SimpleDataManager(image_size, batch_size=64)
+            data_loader = datamgr.get_data_loader(aug=False)
 
-        print(f'Resume from {args.resume} at epoch {args.start_epoch}.')
+    print('  build feature encoder')
+    # feature encoder - ViT 백본 사용
+    modelfile = params.model_path
+    if not os.path.exists(modelfile):
+        print(f"Model file not found: {modelfile}")
+        raise FileNotFoundError(f"Model file not found: {modelfile}")
 
-    ##############################################
-    # Test
-    test_stats = evaluate(data_loader_val, model, criterion, device, args.seed + 10000)
-    print(f"Accuracy of the network on dataset_val: {test_stats['acc1']:.1f}%")
-    if args.output_dir and utils.is_main_process():
-        test_stats['epoch'] = -1
-        with (output_dir / "log.txt").open("a") as f:
-            f.write(json.dumps(test_stats) + "\n")
+    # ViT 모델 로드
+    vit_backbone = load_ViTsmall()
+    vit_backbone = vit_backbone.cuda()
 
-    if args.eval:
-        return
+    # 체크포인트에서 ViT 백본 가중치 로드
+    tmp = torch.load(modelfile)
 
-    ##############################################
-    # Training
-    if utils.is_main_process():
-        writer = SummaryWriter(log_dir=str(output_dir))
+    # 키 확인 및 적절한 state 추출
+    print(f'Available keys in checkpoint: {list(tmp.keys())}')
+
+    # 다양한 키 패턴 시도
+    state = None
+    possible_keys = ['model', 'state', 'model_state']
+    for key in possible_keys:
+        if key in tmp:
+            state = tmp[key]
+            print(f'Using checkpoint key: {key}')
+            break
+
+    if state is None:
+        raise KeyError(f"No valid model state found in checkpoint. Available keys: {list(tmp.keys())}")
+
+    state_keys = list(state.keys())
+    print('state_keys:', len(state_keys))
+
+    # ViT feature encoder를 위한 state dict 준비
+    feature_state = {}
+    for i, key in enumerate(state_keys):
+        if "feature." in key:
+            newkey = key.replace("feature.", "")
+            feature_state[newkey] = state[key]
+
+    print('feature state keys:', len(feature_state))
+    vit_backbone.load_state_dict(feature_state, strict=False)
+    vit_backbone.eval()
+
+    # save feature file
+    print('  extract and save features...')
+    if params.save_epoch != -1:
+        featurefile = os.path.join(params.checkpoint_dir.replace("checkpoints", "features"),
+                                   split + "_" + str(params.save_epoch) + ".hdf5")
     else:
-        writer = None
+        featurefile = os.path.join(params.checkpoint_dir.replace("checkpoints", "features"), split + ".hdf5")
+    dirname = os.path.dirname(featurefile)
+    if not os.path.isdir(dirname):
+        os.makedirs(dirname)
+    save_features(vit_backbone, data_loader, featurefile)
 
-    print(f"Start training for {args.epochs} epochs")
-    start_time = time.time()
-    max_accuracy = 0.0
+    print('\nStage 2: evaluate')
+    acc_all = []
+    iter_num = 1000
+    few_shot_params = dict(n_way=params.test_n_way, n_support=params.n_shot)
 
-    for epoch in range(args.start_epoch, args.epochs):
-        print('args.start_epoch:', args.start_epoch, 'args.epochs:', args.epochs, 'tmp epoch:', epoch)
-        train_stats = train_one_epoch_styleAdv(
-            data_loader_train, model, criterion, optimizer, epoch, device,
-            loss_scaler, args.fp16, args.clip_grad, model_ema, mixup_fn, writer,
-            set_training_mode=False  # TODO: may need eval mode for finetuning
-        )
+    # ViT 기반 StyleAdv 모델
+    print('  build ViT-based model')
+    vit_backbone_eval = load_ViTsmall()
+    model = StyleAdvViT(vit_backbone_eval, **few_shot_params)
+    model = model.cuda()
+    model.eval()
 
-        lr_scheduler.step(epoch)
+    # load model
+    modelfile = params.model_path
+    if modelfile is not None and os.path.exists(modelfile):
+        tmp = torch.load(modelfile)
 
-        test_stats = evaluate(data_loader_val, model, criterion, device, args.seed + 10000)
+        # 모델 state 로드를 위한 키 확인
+        print(f'Loading model from checkpoint keys: {list(tmp.keys())}')
 
-        log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
-                     **{f'test_{k}': v for k, v in test_stats.items()},
-                     'epoch': epoch,
-                     'n_parameters': n_parameters}
+        # 가능한 키들로 시도
+        model_loaded = False
+        possible_model_keys = ['model', 'state', 'model_state']
 
-        if args.output_dir:
-            checkpoint_paths = [output_dir / 'checkpoint.pth', output_dir / 'best.pth']
-            for checkpoint_path in checkpoint_paths:
-                state_dict = {
-                    'model': model_without_ddp.state_dict(),
-                    'optimizer': optimizer.state_dict(),
-                    'lr_scheduler': lr_scheduler.state_dict(),
-                    'epoch': epoch,
-                    'model_ema': get_state_dict(model_ema) if args.model_ema else None,
-                    'args': args,
-                }
-                if loss_scaler is not None:
-                    state_dict['scalar'] = loss_scaler.state_dict()
-                utils.save_on_master(state_dict, checkpoint_path)
+        for key in possible_model_keys:
+            if key in tmp:
+                try:
+                    # classifier 관련 키들을 제외하고 로드
+                    state_dict = tmp[key]
+                    # classifier 관련 키들 필터링
+                    filtered_state_dict = {k: v for k, v in state_dict.items()
+                                           if not k.startswith('classifier.')}
 
-                if test_stats["acc1"] <= max_accuracy:
-                    break  # do not save best.pth
+                    print(f'Loading {len(filtered_state_dict)}/{len(state_dict)} parameters (excluding classifier)')
+                    model.load_state_dict(filtered_state_dict, strict=False)
+                    print(f'Successfully loaded model using key: {key}')
+                    model_loaded = True
+                    break
+                except Exception as e:
+                    print(f'Failed to load model with key {key}: {e}')
+                    continue
 
-        print(f"Accuracy of the network on dataset_val: {test_stats['acc1']:.1f}%")
-        max_accuracy = max(max_accuracy, test_stats["acc1"])
-        print(f'Max accuracy: {max_accuracy:.2f}%')
+        if not model_loaded:
+            raise KeyError(
+                f"Could not load model from any of the keys: {possible_model_keys}. Available keys: {list(tmp.keys())}")
 
-        if args.output_dir and utils.is_main_process():
-            log_stats['best_test_acc'] = max_accuracy
-            with (output_dir / "log.txt").open("a") as f:
-                f.write(json.dumps(log_stats) + "\n")
+    # load feature file
+    print('  load saved feature file')
+    cl_data_file = feat_loader.init_loader(featurefile)
 
-    total_time = time.time() - start_time
-    total_time_str = str(datetime.timedelta(seconds=int(total_time)))
-    print('Training time {}'.format(total_time_str))
+    # start evaluate
+    print('  evaluate')
+    for i in range(iter_num):
+        acc = feature_evaluation(cl_data_file, model, n_query=15, **few_shot_params)
+        acc_all.append(acc)
 
-    if utils.is_main_process():
-        writer.close()
-        import tables
-        tables.file._open_files.close_all()
+    # statics
+    print('  get statics')
+    acc_all = np.asarray(acc_all)
+    acc_mean = np.mean(acc_all)
+    acc_std = np.std(acc_all)
+    print('  %s %d test iterations: Acc = %4.2f%% +- %4.2f%%' % (params.dataset, iter_num, acc_mean,
+                                                                 1.96 * acc_std / np.sqrt(iter_num)))
+    print('  %s %d test iterations: Acc = %4.2f%% +- %4.2f%%' % (params.dataset, iter_num, acc_mean,
+                                                                 1.96 * acc_std / np.sqrt(iter_num)), file=acc_file)
 
-    ##############################################
-    # BSCDFSL 테스트 실행 (학습 완료 후)
-    if utils.is_main_process():
-        best_model_path = output_dir / 'best.pth'
-        if best_model_path.exists():
-            run_bscdfsl_test(args, str(best_model_path))
-        else:
-            print("Best model not found, skipping BSCDFSL test")
-
-
-if __name__ == '__main__':
-    parser = get_args_parser()
-    args = parser.parse_args()
-
-    main(args)
+    # remove feature files [optional]
+    if remove_featurefile:
+        os.remove(featurefile)
