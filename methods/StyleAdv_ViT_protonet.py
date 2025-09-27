@@ -52,7 +52,8 @@ class ProtoNet(nn.Module):
         # backbone
         self.feature = backbone
         final_feat_dim = 384
-        self.classifier = nn.Linear(final_feat_dim, 64)
+        # self.classifier = nn.Linear(final_feat_dim, 64)
+        self.classifier = nn.Linear(final_feat_dim, 100)
 
         self.loss_fn = nn.CrossEntropyLoss()
 

@@ -13,8 +13,6 @@
 
 set -euo pipefail
 
-. /home/$USER/anaconda3/etc/profile.d/conda.sh
-conda activate py36
-
 echo "Starting Sbatch metatrain_StyleAdv_RN_5way_1shot"
-python3 metatrain_StyleAdv_RN.py --dataset miniImagenet --name exp-name --train_aug --warmup baseline --n_shot 1 --stop_epoch 200
+python3 metatrain_StyleAdv_RN.py --dataset miniImagenet --name exp-name --train_aug --warmup baseline --n_shot 5 --stop_epoch 200
+echo "Finish Sbatch metatrain_StyleAdv_RN_5way_1shot"

@@ -179,8 +179,8 @@ def test_bestmodel_bscdfsl(acc_file, name, dataset,n_shot, save_epoch=-1):
   acc_all = np.asarray(acc_all)
   acc_mean = np.mean(acc_all)
   acc_std = np.std(acc_all)
-  print('  %d test iterations: Acc = %4.2f%% +- %4.2f%%' %(iter_num, acc_mean, 1.96* acc_std/np.sqrt(iter_num)))
-  print('  %d test iterations: Acc = %4.2f%% +- %4.2f%%' %(iter_num, acc_mean, 1.96* acc_std/np.sqrt(iter_num)), file = acc_file)
+  print('  %s %d test iterations: Acc = %4.2f%% +- %4.2f%%' %(params.dataset, iter_num, acc_mean, 1.96* acc_std/np.sqrt(iter_num)))
+  print('  %s %d test iterations: Acc = %4.2f%% +- %4.2f%%' %(params.dataset, iter_num, acc_mean, 1.96* acc_std/np.sqrt(iter_num)), file = acc_file)
 
   # remove feature files [optional]
   if remove_featurefile:
