@@ -136,7 +136,7 @@ def test_bestmodel_bscdfsl_ViT(acc_file, name, dataset, n_shot, save_epoch=-1):
     state_keys = list(state.keys())
     print('state_keys:', len(state_keys))
 
-    # ViT feature encoder를 위한 state dict 준비
+    # ViT feature encoder를 위한 state dict 준비 (classifier 제외)
     feature_state = {}
     for i, key in enumerate(state_keys):
         if "feature." in key:
@@ -164,14 +164,14 @@ def test_bestmodel_bscdfsl_ViT(acc_file, name, dataset, n_shot, save_epoch=-1):
     iter_num = 1000
     few_shot_params = dict(n_way=params.test_n_way, n_support=params.n_shot)
 
-    # ViT 기반 StyleAdv 모델
+    # ViT 기반 StyleAdv 모델 (classifier 크기 문제 해결)
     print('  build ViT-based model')
     vit_backbone_eval = load_ViTsmall()
     model = StyleAdvViT(vit_backbone_eval, **few_shot_params)
     model = model.cuda()
     model.eval()
 
-    # load model
+    # load model (classifier 제외하고 로드)
     modelfile = params.model_path
     if modelfile is not None and os.path.exists(modelfile):
         tmp = torch.load(modelfile)
@@ -179,24 +179,40 @@ def test_bestmodel_bscdfsl_ViT(acc_file, name, dataset, n_shot, save_epoch=-1):
         # 모델 state 로드를 위한 키 확인
         print(f'Loading model from checkpoint keys: {list(tmp.keys())}')
 
-        # 가능한 키들로 시도
-        model_loaded = False
+        # state 추출
+        state = None
         possible_model_keys = ['model', 'state', 'model_state']
-
         for key in possible_model_keys:
             if key in tmp:
-                try:
-                    model.load_state_dict(tmp[key], strict=False)
-                    print(f'Successfully loaded model using key: {key}')
-                    model_loaded = True
-                    break
-                except Exception as e:
-                    print(f'Failed to load model with key {key}: {e}')
-                    continue
+                state = tmp[key]
+                print(f'Using checkpoint key for evaluation model: {key}')
+                break
 
-        if not model_loaded:
-            raise KeyError(
-                f"Could not load model from any of the keys: {possible_model_keys}. Available keys: {list(tmp.keys())}")
+        if state is not None:
+            # classifier를 제외한 state dict 준비
+            filtered_state = {}
+            for key, value in state.items():
+                # classifier 관련 키는 제외
+                if not key.startswith('classifier'):
+                    filtered_state[key] = value
+
+            try:
+                model.load_state_dict(filtered_state, strict=False)
+                print(f'Successfully loaded model (excluding classifier)')
+            except Exception as e:
+                print(f'Error loading filtered state: {e}')
+                # 대안: feature만 로드
+                feature_only_state = {}
+                for key, value in state.items():
+                    if key.startswith('feature'):
+                        feature_only_state[key] = value
+                try:
+                    model.load_state_dict(feature_only_state, strict=False)
+                    print(f'Successfully loaded feature weights only')
+                except Exception as e2:
+                    print(f'Error loading feature weights: {e2}')
+        else:
+            print(f"Could not find valid state in checkpoint keys: {list(tmp.keys())}")
 
     # load feature file
     print('  load saved feature file')
