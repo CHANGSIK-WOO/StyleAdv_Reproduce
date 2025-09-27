@@ -50,9 +50,9 @@ class StyleAdvViT(nn.Module):
         if is_feature:
             z_all = x
         else:
-            x = x.contiguous().view(self.n_way * (self.n_support + self.n_query), *x.size()[2:])
+            x = x.contiguous().reshape(self.n_way * (self.n_support + self.n_query), *x.size()[2:])
             z_all = self.feature.forward(x)
-            z_all = z_all.view(self.n_way, self.n_support + self.n_query, -1)
+            z_all = z_all.reshape(self.n_way, self.n_support + self.n_query, -1)
         z_support = z_all[:, :self.n_support]
         z_query = z_all[:, self.n_support:]
         return z_support, z_query
@@ -151,9 +151,9 @@ class StyleAdvViT(nn.Module):
         else:
             # x를 feature로 변환: (n_way, n_support + n_query, 3, 224, 224)
             batch_size = x.size(0) * x.size(1)
-            x_reshaped = x.view(batch_size, *x.size()[2:])
+            x_reshaped = x.reshape(batch_size, *x.size()[2:])
             z_all = self.feature(x_reshaped)
-            z_all = z_all.view(self.n_way, self.n_support + self.n_query, -1)
+            z_all = z_all.reshape(self.n_way, self.n_support + self.n_query, -1)
 
         # ProtoNet forward
         z_support = z_all[:, :self.n_support]  # (n_way, n_support, feat_dim)
@@ -161,16 +161,16 @@ class StyleAdvViT(nn.Module):
 
         # ProtoNet을 위한 reshaping
         supp_x = z_support.unsqueeze(0)  # (1, n_way, n_support, feat_dim)
-        supp_y = torch.arange(self.n_way).unsqueeze(0).repeat(1, self.n_support).view(1, -1)  # (1, n_way*n_support)
+        supp_y = torch.arange(self.n_way).unsqueeze(0).repeat(1, self.n_support).reshape(1, -1)  # (1, n_way*n_support)
         query_x = z_query.unsqueeze(0)  # (1, n_way, n_query, feat_dim)
 
         # ProtoNet forward (feature는 이미 계산됨)
         import torch.nn.functional as F
 
-        supp_f = supp_x.view(1, -1, supp_x.size(-1))  # (1, n_way*n_support, feat_dim)
-        query_f = query_x.view(1, -1, query_x.size(-1))  # (1, n_way*n_query, feat_dim)
+        supp_f = supp_x.reshape(1, -1, supp_x.size(-1))  # (1, n_way*n_support, feat_dim)
+        query_f = query_x.reshape(1, -1, query_x.size(-1))  # (1, n_way*n_query, feat_dim)
 
-        supp_y_1hot = F.one_hot(supp_y.view(-1), self.n_way).transpose(0, 1).unsqueeze(
+        supp_y_1hot = F.one_hot(supp_y.reshape(-1), self.n_way).transpose(0, 1).unsqueeze(
             0).float()  # (1, n_way, n_way*n_support)
 
         # 프로토타입 계산
@@ -179,7 +179,7 @@ class StyleAdvViT(nn.Module):
 
         # 코사인 분류기 (ProtoNet의 cos_classifier 사용)
         scores = self.protonet.cos_classifier(prototypes, query_f)  # (1, n_way*n_query, n_way)
-        scores = scores.view(-1, self.n_way)  # (n_way*n_query, n_way)
+        scores = scores.reshape(-1, self.n_way)  # (n_way*n_query, n_way)
 
         return scores
 
@@ -194,8 +194,8 @@ class StyleAdvViT(nn.Module):
         x_ori = x_ori.cuda()
         y_ori = y_ori.cuda()
         x_size = x_ori.size()
-        x_ori = x_ori.view(x_size[0] * x_size[1], x_size[2], x_size[3], x_size[4])
-        y_ori = y_ori.view(x_size[0] * x_size[1])
+        x_ori = x_ori.reshape(x_size[0] * x_size[1], x_size[2], x_size[3], x_size[4])
+        y_ori = y_ori.reshape(x_size[0] * x_size[1])
 
         # if not adv, set default = 'None'
         adv_style_mean_block1, adv_style_std_block1 = 'None', 'None'
@@ -269,13 +269,13 @@ class StyleAdvViT(nn.Module):
         B, num, dim = x_fea.size()
         x_cls_fea = x_fea[:, :1, :]
         x_patch_fea = x_fea[:, 1:, :]
-        x_patch_fea = x_patch_fea.contiguous().view(B, dim, num - 1).view(B, dim, 14, 14)
+        x_patch_fea = x_patch_fea.contiguous().reshape(B, dim, num - 1).reshape(B, dim, 14, 14)
         return x_cls_fea, x_patch_fea
 
     def postprocessing(self, x_cls_fea, x_patch_fea):
         """ViT feature postprocessing: cls_fea [B, 1, 384], patch_fea [B, 384, 14, 14] -> [B, 197, 384]"""
         B, num, dim = x_patch_fea.size()[0], x_patch_fea.size()[2] * x_patch_fea.size()[3] + 1, x_patch_fea.size()[1]
-        x_patch_fea = x_patch_fea.contiguous().view(B, dim, num - 1).view(B, num - 1, dim)
+        x_patch_fea = x_patch_fea.contiguous().reshape(B, dim, num - 1).reshape(B, num - 1, dim)
         x_fea = torch.cat((x_cls_fea, x_patch_fea), 1)
         return x_fea
 
@@ -330,8 +330,8 @@ class StyleAdvViT(nn.Module):
         # original forward
         x_ori = x_ori.cuda()
         x_size = x_ori.size()
-        x_ori = x_ori.view(x_size[0] * x_size[1], x_size[2], x_size[3], x_size[4])
-        global_y = global_y.view(x_size[0] * x_size[1]).cuda()
+        x_ori = x_ori.reshape(x_size[0] * x_size[1], x_size[2], x_size[3], x_size[4])
+        global_y = global_y.reshape(x_size[0] * x_size[1]).cuda()
 
         x_ori_fea = self.feature.forward(x_ori)
 
@@ -340,12 +340,12 @@ class StyleAdvViT(nn.Module):
         loss_cls_ori = self.loss_fn(scores_cls_ori, global_y)
 
         # original FSL loss
-        scores_fsl_ori = self.set_forward(x_ori.view(x_size), is_feature=False)
+        scores_fsl_ori = self.set_forward(x_ori.reshape(x_size), is_feature=False)
         loss_fsl_ori = self.loss_fn(scores_fsl_ori, y_query)
 
         # adversarial forward
         x_adv = x_adv.cuda()
-        x_adv = x_adv.view(x_size[0] * x_size[1], x_size[2], x_size[3], x_size[4])
+        x_adv = x_adv.reshape(x_size[0] * x_size[1], x_size[2], x_size[3], x_size[4])
 
         x_adv_block1 = self.feature.forward_block1(x_adv)
         x_adv_block1_newStyle = self.changeNewAdvStyle_ViT(x_adv_block1, adv_style_mean_block1, adv_style_std_block1,
@@ -364,7 +364,7 @@ class StyleAdvViT(nn.Module):
         loss_cls_adv = self.loss_fn(scores_cls_adv, global_y)
 
         # adversarial FSL loss
-        scores_fsl_adv = self.set_forward(x_adv.view(x_size), is_feature=False)
+        scores_fsl_adv = self.set_forward(x_adv.reshape(x_size), is_feature=False)
         loss_fsl_adv = self.loss_fn(scores_fsl_adv, y_query)
 
         return scores_fsl_ori, loss_fsl_ori, scores_cls_ori, loss_cls_ori, scores_fsl_adv, loss_fsl_adv, scores_cls_adv, loss_cls_adv

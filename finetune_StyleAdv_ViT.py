@@ -54,10 +54,11 @@ def load_model():
     #pmf_pretrained_ckp = 'outputs/20221106-withoutstyleAdv_metatrain_vit_protonet_exp0_1shot/best.pth'
     
     # 1shot-update todo
-    pmf_pretrained_ckp = 'output/20230723-test-ViT/best.pth'
+    pmf_pretrained_ckp = '%s/%s/best.pth' % (params.save_dir, params.resume_dir)
     state_pmf = torch.load(pmf_pretrained_ckp)['model']
-    
-    #
+    # pmf_pretrained_ckp = '%s/checkpoints/%s/best_model.tar' % (params.save_dir, params.resume_dir)
+    # state_pmf = torch.load(pmf_pretrained_ckp)['state']
+
     state_new = state_pmf
     state_keys = list(state_pmf.keys())
     for i, key in enumerate(state_keys):
@@ -175,9 +176,67 @@ def finetune(novel_loader, n_pseudo=75, n_way=5, n_support=5):
     acc_std = np.std(acc_all)
     print('Test Acc = %4.2f +- %4.2f%%'%(acc_mean, 1.96*acc_std/np.sqrt(iter_num)))
 
-def run_single_testset(params):
+# def run_single_testset(params):
+#     seed = 0
+#     #print("set seed = %d" % seed)
+#     random.seed(seed)
+#     np.random.seed(seed)
+#     torch.manual_seed(seed)
+#     torch.cuda.manual_seed_all(seed)
+#     torch.backends.cudnn.deterministic = True
+#     torch.backends.cudnn.benchmark = False
+#
+#     #np.random.seed(10)
+#     #params = parse_args('train')
+#
+#     #params = parse_args()
+#
+#     image_size = 224
+#     iter_num = 1000
+#     n_query = 15
+#     n_pseudo = 75
+#     #print('n_pseudo: ', n_pseudo)
+#
+#     print('Loading target dataset!:', params.testset)
+#     if params.testset in ['cub', 'cars', 'places', 'plantae']:
+#       novel_file = os.path.join(params.data_dir, params.testset, 'novel.json')
+#       datamgr = SetDataManager(image_size, n_query=n_query, n_way=params.test_n_way, n_support=params.n_shot, n_eposide=iter_num)
+#       novel_loader = datamgr.get_data_loader(novel_file, aug=False)
+#
+#     else:
+#       few_shot_params = dict(n_way = params.test_n_way , n_support = params.n_shot)
+#       if params.testset in ["ISIC"]:
+#         datamgr         = ISIC_few_shot.SetDataManager(image_size, n_eposide = iter_num, n_query = n_query, **few_shot_params)
+#         novel_loader     = datamgr.get_data_loader(aug = False )
+#
+#       elif params.testset in ["EuroSAT"]:
+#         datamgr         = EuroSAT_few_shot.SetDataManager(image_size, n_eposide = iter_num, n_query = n_query, **few_shot_params)
+#         novel_loader     = datamgr.get_data_loader(aug = False )
+#
+#       elif params.testset in ["CropDisease"]:
+#         datamgr         = CropDisease_few_shot.SetDataManager(image_size, n_eposide = iter_num, n_query = n_query, **few_shot_params)
+#         novel_loader     = datamgr.get_data_loader(aug = False )
+#
+#       elif params.testset in ["ChestX"]:
+#         datamgr         = Chest_few_shot.SetDataManager(image_size,  n_eposide = iter_num, n_query = n_query, **few_shot_params)
+#         novel_loader     = datamgr.get_data_loader(aug = False )
+#
+#     finetune(novel_loader, n_pseudo=n_pseudo, n_way=params.test_n_way, n_support=params.n_shot)
+#
+# if __name__=='__main__':
+#     params = parse_args(script='train')
+#     #for tmp_testset in ['cub', 'cars', 'places', 'plantae', 'ChestX', 'ISIC', 'EuroSAT', 'CropDisease']:
+#     #for tmp_testset in ['EuroSAT', 'CropDisease']:
+#     #for tmp_testset in ['CropDisease']:
+#     #for tmp_testset in ['EuroSAT', 'plantae']:
+#     #for tmp_testset in ['ISIC']:
+#     #for tmp_testset in ['ChestX', 'ISIC']:
+#     for tmp_testset in ['EuroSAT']:
+#       params.testset = tmp_testset
+#       run_single_testset(params)
+if __name__=='__main__':
     seed = 0
-    #print("set seed = %d" % seed)
+    print("set seed = %d" % seed)
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -186,7 +245,7 @@ def run_single_testset(params):
     torch.backends.cudnn.benchmark = False
 
     #np.random.seed(10)
-    #params = parse_args('train')
+    params = parse_args('train')
 
     #params = parse_args()
 
@@ -201,7 +260,7 @@ def run_single_testset(params):
       novel_file = os.path.join(params.data_dir, params.testset, 'novel.json')
       datamgr = SetDataManager(image_size, n_query=n_query, n_way=params.test_n_way, n_support=params.n_shot, n_eposide=iter_num)
       novel_loader = datamgr.get_data_loader(novel_file, aug=False)
-    
+
     else:
       few_shot_params = dict(n_way = params.test_n_way , n_support = params.n_shot)
       if params.testset in ["ISIC"]:
@@ -220,16 +279,8 @@ def run_single_testset(params):
         datamgr         = Chest_few_shot.SetDataManager(image_size,  n_eposide = iter_num, n_query = n_query, **few_shot_params)
         novel_loader     = datamgr.get_data_loader(aug = False )
 
+    import time
+    start = time.clock()
     finetune(novel_loader, n_pseudo=n_pseudo, n_way=params.test_n_way, n_support=params.n_shot)
-
-if __name__=='__main__':
-    params = parse_args(script='train')
-    #for tmp_testset in ['cub', 'cars', 'places', 'plantae', 'ChestX', 'ISIC', 'EuroSAT', 'CropDisease']:
-    #for tmp_testset in ['EuroSAT', 'CropDisease']:
-    #for tmp_testset in ['CropDisease']:
-    #for tmp_testset in ['EuroSAT', 'plantae']:
-    #for tmp_testset in ['ISIC']:
-    #for tmp_testset in ['ChestX', 'ISIC']:
-    for tmp_testset in ['EuroSAT']:
-      params.testset = tmp_testset
-      run_single_testset(params)
+    end = time.clock()
+    print('Running time: %s Seconds: %s Min: %s Min per epoch'%(end-start, (end-start)/60, (end-start)/60/iter_num))

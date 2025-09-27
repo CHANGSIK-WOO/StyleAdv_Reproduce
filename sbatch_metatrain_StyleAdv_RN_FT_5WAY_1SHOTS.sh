@@ -15,10 +15,10 @@ set -euo pipefail
 
 echo "Starting Sbatch metatrain_StyleAdv_RN_FT_5way_1shot"
 # ISIC 데이터셋
-#python3 finetune_StyleAdv_RN.py --testset ISIC --name exp-FT-ISIC --train_aug --n_shot 1 --finetune_epoch 10 --finetune_LR 0.005 --resume_dir exp-name/RN_5WAY_1SHOTS --resume_epoch -1
+python3 finetune_StyleAdv_RN.py --testset ISIC --name exp-FT-ISIC --train_aug --n_shot 1 --finetune_epoch 10 --finetune_LR 0.005 --resume_dir exp-name/RN_5WAY_1SHOTS --resume_epoch -1
 
 # EuroSAT 데이터셋
-#python3 finetune_StyleAdv_RN.py --testset EuroSAT --name exp-FT-EuroSAT --train_aug --n_shot 1 --finetune_epoch 10 --finetune_LR 0.005 --resume_dir exp-name/RN_5WAY_1SHOTS --resume_epoch -1
+python3 finetune_StyleAdv_RN.py --testset EuroSAT --name exp-FT-EuroSAT --train_aug --n_shot 1 --finetune_epoch 10 --finetune_LR 0.005 --resume_dir exp-name/RN_5WAY_1SHOTS --resume_epoch -1
 
 # CropDisease 데이터셋
 python3 finetune_StyleAdv_RN.py --testset CropDisease --name exp-FT-CropDisease --train_aug --n_shot 1 --finetune_epoch 10 --finetune_LR 0.005  --resume_dir exp-name/RN_5WAY_1SHOTS --resume_epoch -1
