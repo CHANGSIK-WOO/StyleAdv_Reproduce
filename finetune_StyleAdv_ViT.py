@@ -253,7 +253,7 @@ if __name__ == '__main__':
     # params = parse_args()
 
     image_size = 224
-    iter_num = 200
+    iter_num = 1000
     n_query = 15
     n_pseudo = 75
     # print('n_pseudo: ', n_pseudo)
