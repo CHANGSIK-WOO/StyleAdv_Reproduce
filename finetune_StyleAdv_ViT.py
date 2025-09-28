@@ -95,8 +95,9 @@ def set_forward_ViTProtonet(model, x):
 
 def finetune(novel_loader, n_pseudo=75, n_way=5, n_support=5):
     iter_num = len(novel_loader)
+    print(f"iter_num ={len(novel_loader)}")
     acc_all = []
-
+    model = load_model()
     #checkpoint_dir = '%s/checkpoints/%s/best_model.tar' % (params.save_dir, params.name)
     #checkpoint_dir = '%s/checkpoints/%s/best_model.tar' % (params.save_dir, params.resume_dir)
     #state = torch.load(checkpoint_dir)['state']
@@ -125,7 +126,6 @@ def finetune(novel_loader, n_pseudo=75, n_way=5, n_support=5):
         else:
             model.load_state_dict(state, strict = False)
         '''
-        model = load_model()
         x = x.cuda()
         # Finetune components initialization
         xs = x[:, :n_support].reshape(-1, *x.size()[2:])  # (25, 3, 224, 224)
@@ -168,8 +168,8 @@ def finetune(novel_loader, n_pseudo=75, n_way=5, n_support=5):
         torch.cuda.empty_cache()
         #print('Task %d : %4.2f%%'%(ti, acc))
         #print('Task %d : %4.2f%%, mean Acc: %4.2f'%(ti, acc, np.mean(np.array(acc_all))))
-        if(ti%50==0):
-          print('Task %d : %4.2f%%, mean Acc: %4.2f'%(ti, acc, np.mean(np.array(acc_all))))
+        # if(ti%50==0):
+        print('Task %d : %4.2f%%, mean Acc: %4.2f'%(ti, acc, np.mean(np.array(acc_all))))
 
     acc_all = np.asarray(acc_all)
     acc_mean = np.mean(acc_all)
@@ -250,8 +250,8 @@ if __name__=='__main__':
     #params = parse_args()
 
     image_size = 224
-    iter_num = 1000
-    n_query = 15
+    iter_num = 200
+    n_query = 16 #n_query = 15 -> 16
     n_pseudo = 75
     #print('n_pseudo: ', n_pseudo)
 
