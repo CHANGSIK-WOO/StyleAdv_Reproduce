@@ -95,7 +95,6 @@ class SimpleDataset:
 
 
         d = CustomDatasetFromImages()
-
         for i, (data, label) in enumerate(d):
             self.meta['image_names'].append(data)
             self.meta['image_labels'].append(label)  
@@ -179,7 +178,6 @@ class TransformLoader:
     def __init__(self, image_size, 
                  normalize_param    = dict(mean= [0.485, 0.456, 0.406] , std=[0.229, 0.224, 0.225]),
                  jitter_param       = dict(Brightness=0.4, Contrast=0.4, Color=0.4)):
-        
         self.image_size = image_size
         self.normalize_param = normalize_param
         self.jitter_param = jitter_param
@@ -189,14 +187,11 @@ class TransformLoader:
             method = add_transforms.ImageJitter( self.jitter_param )
             return method
         method = getattr(transforms, transform_type)
-
         if transform_type=='RandomSizedCrop':
-            return method(self.image_size) 
-
+            return method(self.image_size)
         elif transform_type=='CenterCrop':
             return method(self.image_size) 
         elif transform_type=='Scale':
-
             return method([int(self.image_size*1.15), int(self.image_size*1.15)])
         elif transform_type=='Normalize':
             return method(**self.normalize_param )

@@ -99,7 +99,6 @@ def finetune(novel_loader, n_pseudo=75, n_way=5, n_support=5):
     iter_num = len(novel_loader)
     print(f"iter_num ={len(novel_loader)}")
     acc_all = []
-    model = load_model()
     # checkpoint_dir = '%s/checkpoints/%s/best_model.tar' % (params.save_dir, params.name)
     # checkpoint_dir = '%s/checkpoints/%s/best_model.tar' % (params.save_dir, params.resume_dir)
     # state = torch.load(checkpoint_dir)['state']
@@ -128,6 +127,7 @@ def finetune(novel_loader, n_pseudo=75, n_way=5, n_support=5):
         else:
             model.load_state_dict(state, strict = False)
         '''
+        model = load_model()
         x = x.cuda()
         # Finetune components initialization
         xs = x[:, :n_support].reshape(-1, *x.size()[2:])  # (25, 3, 224, 224)

@@ -19,6 +19,8 @@ def parse_args(script):
   parser.add_argument('--train_aug'   , action='store_true',  help='perform data augmentation or not during training ')
   parser.add_argument('--name'        , default='tmp', type=str, help='')
   parser.add_argument('--save_dir'    , default='./output', type=str, help='')
+
+  parser.add_argument('--lambda_gram', default=0.5, type=float, help='Gram matrix weight for style adversarial training') # 25.09.30
   #parser.add_argument('--data_dir'    , default='./filelists', type=str, help='')
   #parser.add_argument('--data_dir'    , default='/share/test/lovelyqian/CROSS-DOMAIN-FSL-DATASETS', type=str, help='')
   parser.add_argument('--data_dir', default='/data/changsik/cdfsl-benchmark/filelists', type=str, help='')

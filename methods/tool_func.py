@@ -20,6 +20,15 @@ def calc_mean_std(feat, eps=1e-5):
     feat_mean = feat.view(N, C, -1).mean(dim=2).view(N, C, 1, 1)
     return feat_mean, feat_std
 
+# 25.09.29
+def compute_gram_matrix(feat, eps=1e-5):
+    """Gram matrix로 채널 간 상관관계 캡처"""
+    B, C, H, W = feat.size()
+    feat_flat = feat.view(B, C, -1)
+    gram = torch.bmm(feat_flat, feat_flat.transpose(1, 2))
+    gram = gram / (C * H * W + eps)
+    return gram
+
 def fgsm_attack(init_input, epsilon, data_grad):
     # random start init_input
     init_input = init_input + torch.empty_like(init_input).uniform_(START_EPS, START_EPS)
@@ -66,3 +75,4 @@ def consistency_loss(scoresM1, scoresM2, type='euclidean'):
     else:
         return
     return dis
+

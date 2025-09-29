@@ -18,7 +18,6 @@ sys.path.append("../")
 #from configs import *
 from config_bscdfsl_dir import *
 
-
 class CustomDatasetFromImages(Dataset):
     def __init__(self, csv_path= ISIC_path + "/ISIC2018_Task3_Training_GroundTruth/ISIC2018_Task3_Training_GroundTruth.csv", \
         image_path =  ISIC_path + "/ISIC2018_Task3_Training_Input/"):
@@ -167,7 +166,7 @@ class TransformLoader:
             return method
         method = getattr(transforms, transform_type)
         if transform_type=='RandomSizedCrop':
-            return method(self.image_size) 
+            return method(self.image_size)
         elif transform_type=='CenterCrop':
             return method(self.image_size) 
         elif transform_type=='Scale':

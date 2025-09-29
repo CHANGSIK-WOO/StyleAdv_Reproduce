@@ -79,7 +79,8 @@ class StyleAdvGNN(MetaTemplate):
     return scores, loss
 
 
-  def adversarial_attack_Incre(self, x_ori, y_ori, epsilon_list):
+  # def adversarial_attack_Incre(self, x_ori, y_ori, epsilon_list):
+  def adversarial_attack_Incre(self, x_ori, y_ori, epsilon_list, lambda_gram=0.5):
     x_ori = x_ori.cuda()
     y_ori = y_ori.cuda()
     x_size = x_ori.size()
@@ -104,6 +105,12 @@ class StyleAdvGNN(MetaTemplate):
       ori_style_std_block1 = torch.nn.Parameter(ori_style_std_block1)
       ori_style_mean_block1.requires_grad_()
       ori_style_std_block1.requires_grad_()
+
+      # === Gram Matrix (새로 추가) ===
+      ori_gram_block1 = compute_gram_matrix(x_ori_block1)
+      ori_gram_block1 = torch.nn.Parameter(ori_gram_block1)
+      ori_gram_block1.requires_grad_()
+
       # contain ori_style_mean_block1 in the graph 
       x_normalized_block1 = (x_ori_block1 - ori_style_mean_block1.detach().expand(feat_size_block1)) / ori_style_std_block1.detach().expand(feat_size_block1)
       x_ori_block1 = x_normalized_block1 * ori_style_std_block1.expand(feat_size_block1) + ori_style_mean_block1.expand(feat_size_block1)
@@ -117,20 +124,29 @@ class StyleAdvGNN(MetaTemplate):
     
       # calculate initial pred, loss and acc
       ori_pred = x_ori_output.max(1, keepdim=True)[1]
-      ori_loss = self.loss_fn(x_ori_output, y_ori)
-      ori_acc = (ori_pred == y_ori).type(torch.float).sum().item() / y_ori.size()[0]
+      # ori_loss = self.loss_fn(x_ori_output, y_ori)
 
-      # zero all the existing gradients
+      ori_loss = self.loss_fn(x_ori_output, y_ori)
+
+      current_gram = compute_gram_matrix(x_ori_block1)
+      gram_loss = F.mse_loss(current_gram, ori_gram_block1)
+
+      # Total loss
+      total_loss = ori_loss + lambda_gram * gram_loss
+
+      # Zero gradients
       self.feature.zero_grad()
       self.classifier.zero_grad()
-   
-      # backward loss
-      ori_loss.backward()
+
+      total_loss.backward()  # 기존 ori_loss.backward() 대체
+      ori_acc = (ori_pred == y_ori).type(torch.float).sum().item() / y_ori.size()[0]
 
       # collect datagrad
       grad_ori_style_mean_block1 = ori_style_mean_block1.grad.detach()
       grad_ori_style_std_block1 = ori_style_std_block1.grad.detach()
-    
+
+      grad_ori_gram_block1 = ori_gram_block1.grad.detach()
+
       # fgsm style attack
       index = torch.randint(0, len(epsilon_list), (1, ))[0]
       epsilon = epsilon_list[index]
@@ -157,6 +173,12 @@ class StyleAdvGNN(MetaTemplate):
       ori_style_std_block2 = torch.nn.Parameter(ori_style_std_block2)
       ori_style_mean_block2.requires_grad_()
       ori_style_std_block2.requires_grad_()
+
+      # Gram Matrix
+      ori_gram_block2 = compute_gram_matrix(x_ori_block2)
+      ori_gram_block2 = torch.nn.Parameter(ori_gram_block2)
+      ori_gram_block2.requires_grad_()
+
       # contain ori_style_mean_block1 in the graph 
       x_normalized_block2 = (x_ori_block2 - ori_style_mean_block2.detach().expand(feat_size_block2)) / ori_style_std_block2.detach().expand(feat_size_block2)
       x_ori_block2 = x_normalized_block2 * ori_style_std_block2.expand(feat_size_block2) + ori_style_mean_block2.expand(feat_size_block2)
@@ -165,18 +187,29 @@ class StyleAdvGNN(MetaTemplate):
       x_ori_block4 = self.feature.forward_block4(x_ori_block3)
       x_ori_fea = self.feature.forward_rest(x_ori_block4)
       x_ori_output = self.classifier.forward(x_ori_fea)
+
       # calculate initial pred, loss and acc
       ori_pred = x_ori_output.max(1, keepdim=True)[1]
       ori_loss = self.loss_fn(x_ori_output, y_ori)
       ori_acc = (ori_pred == y_ori).type(torch.float).sum().item() / y_ori.size()[0]
+      current_gram = compute_gram_matrix(x_ori_block2)
+      gram_loss = F.mse_loss(current_gram, ori_gram_block2)
+      total_loss = ori_loss + lambda_gram * gram_loss
+
       # zero all the existing gradients
       self.feature.zero_grad()
       self.classifier.zero_grad()
+
       # backward loss
-      ori_loss.backward()
+      #ori_loss.backward()
+      self.feature.zero_grad()
+      self.classifier.zero_grad()
+      total_loss.backward()
+
       # collect datagrad
       grad_ori_style_mean_block2 = ori_style_mean_block2.grad.detach()
       grad_ori_style_std_block2 = ori_style_std_block2.grad.detach()
+
       # fgsm style attack
       index = torch.randint(0, len(epsilon_list), (1, ))[0]
       epsilon = epsilon_list[index]
@@ -202,6 +235,12 @@ class StyleAdvGNN(MetaTemplate):
       ori_style_std_block3 = torch.nn.Parameter(ori_style_std_block3)
       ori_style_mean_block3.requires_grad_()
       ori_style_std_block3.requires_grad_()
+
+      # Gram Matrix
+      ori_gram_block3 = compute_gram_matrix(x_ori_block3)
+      ori_gram_block3 = torch.nn.Parameter(ori_gram_block3)
+      ori_gram_block3.requires_grad_()
+
       # contain ori_style_mean_block3 in the graph 
       x_normalized_block3 = (x_ori_block3 - ori_style_mean_block3.detach().expand(feat_size_block3)) / ori_style_std_block3.detach().expand(feat_size_block3)
       x_ori_block3 = x_normalized_block3 * ori_style_std_block3.expand(feat_size_block3) + ori_style_mean_block3.expand(feat_size_block3)
@@ -213,11 +252,15 @@ class StyleAdvGNN(MetaTemplate):
       ori_pred = x_ori_output.max(1, keepdim=True)[1]
       ori_loss = self.loss_fn(x_ori_output, y_ori)
       ori_acc = (ori_pred == y_ori).type(torch.float).sum().item() / y_ori.size()[0]
+      current_gram = compute_gram_matrix(x_ori_block3)
+      gram_loss = F.mse_loss(current_gram, ori_gram_block3)
+      total_loss = ori_loss + lambda_gram * gram_loss
       # zero all the existing gradients
       self.feature.zero_grad()
       self.classifier.zero_grad()
       # backward loss
-      ori_loss.backward()
+      #ori_loss.backward()
+      total_loss.backward()
       # collect datagrad
       grad_ori_style_mean_block3 = ori_style_mean_block3.grad.detach()
       grad_ori_style_std_block3 = ori_style_std_block3.grad.detach()
