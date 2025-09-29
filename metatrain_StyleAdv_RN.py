@@ -27,7 +27,8 @@ def train(base_loader, val_loader,  model, start_epoch, stop_epoch, params):
   # start
   for epoch in range(start_epoch, stop_epoch):
     model.train()
-    total_it = model.train_loop(epoch, base_loader, optimizer, total_it) #model are called by reference, no need to return
+    #total_it = model.train_loop(epoch, base_loader, optimizer, total_it) #model are called by reference, no need to return
+    total_it = model.train_loop(epoch, base_loader, optimizer, total_it, lambda_gram=params.lambda_gram)
     model.eval()
 
     acc = model.test_loop( val_loader)

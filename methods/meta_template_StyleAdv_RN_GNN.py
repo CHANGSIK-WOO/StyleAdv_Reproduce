@@ -53,7 +53,9 @@ class MetaTemplate(nn.Module):
     return float(top1_correct), len(y_query), loss.item()*len(y_query)
 
 
-  def train_loop(self, epoch, train_loader_ori,  optimizer, total_it):
+  #def train_loop(self, epoch, train_loader_ori,  optimizer, total_it):
+  def train_loop(self, epoch, train_loader_ori, optimizer, total_it, lambda_gram=0.5):
+
     print_freq = len(train_loader_ori) // 10
     avg_loss=0
     for i, (x_ori, global_y ) in enumerate(train_loader_ori):
@@ -64,7 +66,9 @@ class MetaTemplate(nn.Module):
 
       epsilon_list = [0.8, 0.08, 0.008]
 
-      scores_fsl_ori, loss_fsl_ori, scores_cls_ori, loss_cls_ori, scores_fsl_adv, loss_fsl_adv, scores_cls_adv, loss_cls_adv = self.set_forward_loss_StyAdv(x_ori, global_y, epsilon_list)
+      #scores_fsl_ori, loss_fsl_ori, scores_cls_ori, loss_cls_ori, scores_fsl_adv, loss_fsl_adv, scores_cls_adv, loss_cls_adv = self.set_forward_loss_StyAdv(x_ori, global_y, epsilon_list)
+      scores_fsl_ori, loss_fsl_ori, scores_cls_ori, loss_cls_ori, scores_fsl_adv, loss_fsl_adv, scores_cls_adv, loss_cls_adv = self.set_forward_loss_StyAdv(
+          x_ori, global_y, epsilon_list, lambda_gram=lambda_gram)
 
       # consistency loss between initial and styleAdv
       if(scores_fsl_ori.equal(scores_fsl_adv)):

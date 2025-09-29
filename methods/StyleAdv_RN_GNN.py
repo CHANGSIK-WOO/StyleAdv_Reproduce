@@ -287,7 +287,7 @@ class StyleAdvGNN(MetaTemplate):
     return 
    
 
-  def set_forward_loss_StyAdv(self, x_ori, global_y, epsilon_list):
+  def set_forward_loss_StyAdv(self, x_ori, global_y, epsilon_list, lambda_gram=0.5):
     ##################################################################
     # 0. first cp x_adv from x_ori
     x_adv = x_ori
@@ -296,8 +296,10 @@ class StyleAdvGNN(MetaTemplate):
     # 1. styleAdv
     self.set_statues_of_modules('eval') 
 
-    adv_style_mean_block1, adv_style_std_block1, adv_style_mean_block2, adv_style_std_block2, adv_style_mean_block3, adv_style_std_block3 = self.adversarial_attack_Incre(x_ori, global_y, epsilon_list)
- 
+    #adv_style_mean_block1, adv_style_std_block1, adv_style_mean_block2, adv_style_std_block2, adv_style_mean_block3, adv_style_std_block3 = self.adversarial_attack_Incre(x_ori, global_y, epsilon_list)
+    adv_style_mean_block1, adv_style_std_block1, adv_style_mean_block2, adv_style_std_block2, adv_style_mean_block3, adv_style_std_block3 = self.adversarial_attack_Incre(
+        x_ori, global_y, epsilon_list, lambda_gram=lambda_gram)
+
     self.feature.zero_grad()
     self.fc.zero_grad()
     self.classifier.zero_grad()
