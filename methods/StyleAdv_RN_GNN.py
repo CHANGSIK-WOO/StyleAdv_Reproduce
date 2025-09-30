@@ -1,4 +1,5 @@
 import torch
+import torch.nn.functional as F
 import torch.nn as nn
 import numpy as np
 import random
@@ -80,197 +81,240 @@ class StyleAdvGNN(MetaTemplate):
 
 
   # def adversarial_attack_Incre(self, x_ori, y_ori, epsilon_list):
+  # ========================================
+  # 파일: methods/StyleAdv_RN_GNN.py
+  # 함수: adversarial_attack_Incre (완전히 새로 작성)
+  # ========================================
+
   def adversarial_attack_Incre(self, x_ori, y_ori, epsilon_list, lambda_gram=0.5):
-    x_ori = x_ori.cuda()
-    y_ori = y_ori.cuda()
-    x_size = x_ori.size()
-    x_ori = x_ori.view(x_size[0]*x_size[1], x_size[2], x_size[3], x_size[4])
-    y_ori = y_ori.view(x_size[0]*x_size[1])
+      """
+      올바른 Gram Loss 구현:
+      1. Original feature의 Gram matrix 계산
+      2. Mean/std를 adversarially perturb
+      3. 변형된 feature의 Gram matrix 계산
+      4. 두 Gram의 차이를 loss로 사용
+      """
+      x_ori = x_ori.cuda()
+      y_ori = y_ori.cuda()
+      x_size = x_ori.size()
+      x_ori = x_ori.view(x_size[0] * x_size[1], x_size[2], x_size[3], x_size[4])
+      y_ori = y_ori.view(x_size[0] * x_size[1])
 
-    # if not adv, set defalut = 'None'
-    adv_style_mean_block1, adv_style_std_block1 = 'None', 'None'
-    adv_style_mean_block2, adv_style_std_block2 = 'None', 'None'
-    adv_style_mean_block3, adv_style_std_block3 = 'None', 'None'
+      adv_style_mean_block1, adv_style_std_block1 = 'None', 'None'
+      adv_style_mean_block2, adv_style_std_block2 = 'None', 'None'
+      adv_style_mean_block3, adv_style_std_block3 = 'None', 'None'
 
-    # forward and set the grad = True
-    blocklist = 'block123'
-    
-    if('1' in blocklist and epsilon_list[0] != 0 ):
-      # forward block1
-      x_ori_block1 = self.feature.forward_block1(x_ori)
-      feat_size_block1 = x_ori_block1.size()
-      ori_style_mean_block1, ori_style_std_block1 = calc_mean_std(x_ori_block1)
-      # set them as learnable parameters
-      ori_style_mean_block1  = torch.nn.Parameter(ori_style_mean_block1)
-      ori_style_std_block1 = torch.nn.Parameter(ori_style_std_block1)
-      ori_style_mean_block1.requires_grad_()
-      ori_style_std_block1.requires_grad_()
+      blocklist = 'block123'
 
-      # === Gram Matrix (새로 추가) ===
-      ori_gram_block1 = compute_gram_matrix(x_ori_block1)
-      ori_gram_block1 = torch.nn.Parameter(ori_gram_block1)
-      ori_gram_block1.requires_grad_()
+      # ========================================
+      # Block 1
+      # ========================================
+      if ('1' in blocklist and epsilon_list[0] != 0):
+          # Step 1: Forward original feature
+          x_ori_block1 = self.feature.forward_block1(x_ori)
+          feat_size_block1 = x_ori_block1.size()
 
-      # contain ori_style_mean_block1 in the graph 
-      x_normalized_block1 = (x_ori_block1 - ori_style_mean_block1.detach().expand(feat_size_block1)) / ori_style_std_block1.detach().expand(feat_size_block1)
-      x_ori_block1 = x_normalized_block1 * ori_style_std_block1.expand(feat_size_block1) + ori_style_mean_block1.expand(feat_size_block1)
-      
-      # pass the rest model
-      x_ori_block2 = self.feature.forward_block2(x_ori_block1)
-      x_ori_block3 = self.feature.forward_block3(x_ori_block2)
-      x_ori_block4 = self.feature.forward_block4(x_ori_block3)
-      x_ori_fea = self.feature.forward_rest(x_ori_block4)
-      x_ori_output = self.classifier.forward(x_ori_fea)
-    
-      # calculate initial pred, loss and acc
-      ori_pred = x_ori_output.max(1, keepdim=True)[1]
-      # ori_loss = self.loss_fn(x_ori_output, y_ori)
+          # Step 2: 원본 feature의 Gram matrix (detached, gradient 안 받음)
+          with torch.no_grad():
+              ori_gram_block1_ref = compute_gram_matrix(x_ori_block1.detach())
 
-      ori_loss = self.loss_fn(x_ori_output, y_ori)
+          # Step 3: Mean/Std를 learnable parameter로
+          ori_style_mean_block1, ori_style_std_block1 = calc_mean_std(x_ori_block1)
+          ori_style_mean_block1 = torch.nn.Parameter(ori_style_mean_block1)
+          ori_style_std_block1 = torch.nn.Parameter(ori_style_std_block1)
+          ori_style_mean_block1.requires_grad_()
+          ori_style_std_block1.requires_grad_()
 
-      current_gram = compute_gram_matrix(x_ori_block1)
-      gram_loss = F.mse_loss(current_gram, ori_gram_block1)
+          # Step 4: Style transformation (mean/std 변경)
+          x_normalized_block1 = (x_ori_block1 - ori_style_mean_block1.detach().expand(
+              feat_size_block1)) / ori_style_std_block1.detach().expand(feat_size_block1)
+          x_transformed_block1 = x_normalized_block1 * ori_style_std_block1.expand(
+              feat_size_block1) + ori_style_mean_block1.expand(feat_size_block1)
 
-      # Total loss
-      total_loss = ori_loss + lambda_gram * gram_loss
+          # Step 5: Forward transformed feature
+          x_block2 = self.feature.forward_block2(x_transformed_block1)
+          x_block3 = self.feature.forward_block3(x_block2)
+          x_block4 = self.feature.forward_block4(x_block3)
+          x_fea = self.feature.forward_rest(x_block4)
+          x_output = self.classifier.forward(x_fea)
 
-      # Zero gradients
+          # Step 6: Classification loss
+          ori_pred = x_output.max(1, keepdim=True)[1]
+          ori_loss = self.loss_fn(x_output, y_ori)
+          ori_acc = (ori_pred == y_ori).type(torch.float).sum().item() / y_ori.size()[0]
+
+          # Step 7: Gram loss (transformed feature vs original feature)
+          if lambda_gram > 0:
+              # 변형된 feature의 Gram matrix
+              transformed_gram_block1 = compute_gram_matrix(x_transformed_block1)
+
+              # 원본과 변형된 feature의 Gram 차이
+              # 목표: Style이 변하면 Gram도 변하도록 유도
+              gram_loss = F.mse_loss(transformed_gram_block1, ori_gram_block1_ref)
+              print(f"gram_loss in block 1: {gram_loss}")
+
+              # 또는 차이를 최대화하려면 (더 diverse한 style):
+              # gram_loss = -F.mse_loss(transformed_gram_block1, ori_gram_block1_ref)
+          else:
+              gram_loss = 0
+
+          # Step 8: Total loss
+          if isinstance(gram_loss, int):
+              total_loss = ori_loss
+          else:
+              total_loss = ori_loss + lambda_gram * gram_loss
+
+          # Step 9: Backward
+          self.feature.zero_grad()
+          self.classifier.zero_grad()
+          total_loss.backward()
+
+          # Step 10: Collect gradients
+          grad_ori_style_mean_block1 = ori_style_mean_block1.grad.detach()
+          grad_ori_style_std_block1 = ori_style_std_block1.grad.detach()
+
+          # Step 11: FGSM attack
+          index = torch.randint(0, len(epsilon_list), (1,))[0]
+          epsilon = epsilon_list[index]
+          adv_style_mean_block1 = fgsm_attack(ori_style_mean_block1, epsilon, grad_ori_style_mean_block1)
+          adv_style_std_block1 = fgsm_attack(ori_style_std_block1, epsilon, grad_ori_style_std_block1)
+
       self.feature.zero_grad()
       self.classifier.zero_grad()
 
-      total_loss.backward()  # 기존 ori_loss.backward() 대체
-      ori_acc = (ori_pred == y_ori).type(torch.float).sum().item() / y_ori.size()[0]
+      # ========================================
+      # Block 2 (동일한 패턴)
+      # ========================================
+      if ('2' in blocklist and epsilon_list[1] != 0):
+          # Forward with adversarial style from block1
+          x_ori_block1 = self.feature.forward_block1(x_ori)
+          x_adv_block1 = changeNewAdvStyle(x_ori_block1, adv_style_mean_block1, adv_style_std_block1, p_thred=0)
 
-      # collect datagrad
-      grad_ori_style_mean_block1 = ori_style_mean_block1.grad.detach()
-      grad_ori_style_std_block1 = ori_style_std_block1.grad.detach()
+          x_ori_block2 = self.feature.forward_block2(x_adv_block1)
+          feat_size_block2 = x_ori_block2.size()
 
-      grad_ori_gram_block1 = ori_gram_block1.grad.detach()
+          # Original Gram (reference)
+          with torch.no_grad():
+              ori_gram_block2_ref = compute_gram_matrix(x_ori_block2.detach())
 
-      # fgsm style attack
-      index = torch.randint(0, len(epsilon_list), (1, ))[0]
-      epsilon = epsilon_list[index]
+          # Mean/Std parameters
+          ori_style_mean_block2, ori_style_std_block2 = calc_mean_std(x_ori_block2)
+          ori_style_mean_block2 = torch.nn.Parameter(ori_style_mean_block2)
+          ori_style_std_block2 = torch.nn.Parameter(ori_style_std_block2)
+          ori_style_mean_block2.requires_grad_()
+          ori_style_std_block2.requires_grad_()
 
-      adv_style_mean_block1 = fgsm_attack(ori_style_mean_block1, epsilon, grad_ori_style_mean_block1)
-      adv_style_std_block1 = fgsm_attack(ori_style_std_block1, epsilon, grad_ori_style_std_block1)
+          # Style transformation
+          x_normalized_block2 = (x_ori_block2 - ori_style_mean_block2.detach().expand(
+              feat_size_block2)) / ori_style_std_block2.detach().expand(feat_size_block2)
+          x_transformed_block2 = x_normalized_block2 * ori_style_std_block2.expand(
+              feat_size_block2) + ori_style_mean_block2.expand(feat_size_block2)
 
-    # add zero_grad
-    self.feature.zero_grad()
-    self.classifier.zero_grad()
+          # Forward
+          x_block3 = self.feature.forward_block3(x_transformed_block2)
+          x_block4 = self.feature.forward_block4(x_block3)
+          x_fea = self.feature.forward_rest(x_block4)
+          x_output = self.classifier.forward(x_fea)
 
-    if('2' in blocklist and epsilon_list[1] != 0):
-      # forward block1
-      x_ori_block1 = self.feature.forward_block1(x_ori)
-      # update adv_block1
-      x_adv_block1 = changeNewAdvStyle(x_ori_block1, adv_style_mean_block1, adv_style_std_block1, p_thred=0)
-      # forward block2
-      x_ori_block2 = self.feature.forward_block2(x_adv_block1) 
-      # calculate mean and std
-      feat_size_block2 = x_ori_block2.size()
-      ori_style_mean_block2, ori_style_std_block2 = calc_mean_std(x_ori_block2)
-      # set them as learnable parameters
-      ori_style_mean_block2  = torch.nn.Parameter(ori_style_mean_block2)
-      ori_style_std_block2 = torch.nn.Parameter(ori_style_std_block2)
-      ori_style_mean_block2.requires_grad_()
-      ori_style_std_block2.requires_grad_()
+          # Loss
+          ori_pred = x_output.max(1, keepdim=True)[1]
+          ori_loss = self.loss_fn(x_output, y_ori)
+          ori_acc = (ori_pred == y_ori).type(torch.float).sum().item() / y_ori.size()[0]
 
-      # Gram Matrix
-      ori_gram_block2 = compute_gram_matrix(x_ori_block2)
-      ori_gram_block2 = torch.nn.Parameter(ori_gram_block2)
-      ori_gram_block2.requires_grad_()
+          # Gram loss
+          if lambda_gram > 0:
+              transformed_gram_block2 = compute_gram_matrix(x_transformed_block2)
+              gram_loss = F.mse_loss(transformed_gram_block2, ori_gram_block2_ref)
+          else:
+              gram_loss = 0
 
-      # contain ori_style_mean_block1 in the graph 
-      x_normalized_block2 = (x_ori_block2 - ori_style_mean_block2.detach().expand(feat_size_block2)) / ori_style_std_block2.detach().expand(feat_size_block2)
-      x_ori_block2 = x_normalized_block2 * ori_style_std_block2.expand(feat_size_block2) + ori_style_mean_block2.expand(feat_size_block2)
-      # pass the rest model
-      x_ori_block3 = self.feature.forward_block3(x_ori_block2)
-      x_ori_block4 = self.feature.forward_block4(x_ori_block3)
-      x_ori_fea = self.feature.forward_rest(x_ori_block4)
-      x_ori_output = self.classifier.forward(x_ori_fea)
+          # Total loss
+          if isinstance(gram_loss, int):
+              total_loss = ori_loss
+          else:
+              total_loss = ori_loss + lambda_gram * gram_loss
 
-      # calculate initial pred, loss and acc
-      ori_pred = x_ori_output.max(1, keepdim=True)[1]
-      ori_loss = self.loss_fn(x_ori_output, y_ori)
-      ori_acc = (ori_pred == y_ori).type(torch.float).sum().item() / y_ori.size()[0]
-      current_gram = compute_gram_matrix(x_ori_block2)
-      gram_loss = F.mse_loss(current_gram, ori_gram_block2)
-      total_loss = ori_loss + lambda_gram * gram_loss
+          self.feature.zero_grad()
+          self.classifier.zero_grad()
+          total_loss.backward()
 
-      # zero all the existing gradients
+          grad_ori_style_mean_block2 = ori_style_mean_block2.grad.detach()
+          grad_ori_style_std_block2 = ori_style_std_block2.grad.detach()
+
+          index = torch.randint(0, len(epsilon_list), (1,))[0]
+          epsilon = epsilon_list[index]
+          adv_style_mean_block2 = fgsm_attack(ori_style_mean_block2, epsilon, grad_ori_style_mean_block2)
+          adv_style_std_block2 = fgsm_attack(ori_style_std_block2, epsilon, grad_ori_style_std_block2)
+
       self.feature.zero_grad()
       self.classifier.zero_grad()
 
-      # backward loss
-      #ori_loss.backward()
-      self.feature.zero_grad()
-      self.classifier.zero_grad()
-      total_loss.backward()
+      # ========================================
+      # Block 3 (동일한 패턴)
+      # ========================================
+      if ('3' in blocklist and epsilon_list[2] != 0):
+          # Forward with adversarial styles from block1, block2
+          x_ori_block1 = self.feature.forward_block1(x_ori)
+          x_adv_block1 = changeNewAdvStyle(x_ori_block1, adv_style_mean_block1, adv_style_std_block1, p_thred=0)
+          x_ori_block2 = self.feature.forward_block2(x_adv_block1)
+          x_adv_block2 = changeNewAdvStyle(x_ori_block2, adv_style_mean_block2, adv_style_std_block2, p_thred=0)
 
-      # collect datagrad
-      grad_ori_style_mean_block2 = ori_style_mean_block2.grad.detach()
-      grad_ori_style_std_block2 = ori_style_std_block2.grad.detach()
+          x_ori_block3 = self.feature.forward_block3(x_adv_block2)
+          feat_size_block3 = x_ori_block3.size()
 
-      # fgsm style attack
-      index = torch.randint(0, len(epsilon_list), (1, ))[0]
-      epsilon = epsilon_list[index]
-      adv_style_mean_block2 = fgsm_attack(ori_style_mean_block2, epsilon, grad_ori_style_mean_block2)
-      adv_style_std_block2 = fgsm_attack(ori_style_std_block2, epsilon, grad_ori_style_std_block2)
+          # Original Gram (reference)
+          with torch.no_grad():
+              ori_gram_block3_ref = compute_gram_matrix(x_ori_block3.detach())
 
-    # add zero_grad
-    self.feature.zero_grad()
-    self.classifier.zero_grad()
+          # Mean/Std parameters
+          ori_style_mean_block3, ori_style_std_block3 = calc_mean_std(x_ori_block3)
+          ori_style_mean_block3 = torch.nn.Parameter(ori_style_mean_block3)
+          ori_style_std_block3 = torch.nn.Parameter(ori_style_std_block3)
+          ori_style_mean_block3.requires_grad_()
+          ori_style_std_block3.requires_grad_()
 
-    if('3' in blocklist and epsilon_list[2] != 0):
-      # forward block1, block2, block3
-      x_ori_block1 = self.feature.forward_block1(x_ori)
-      x_adv_block1 = changeNewAdvStyle(x_ori_block1, adv_style_mean_block1, adv_style_std_block1, p_thred=0)
-      x_ori_block2 = self.feature.forward_block2(x_adv_block1)
-      x_adv_block2 = changeNewAdvStyle(x_ori_block2, adv_style_mean_block2, adv_style_std_block2, p_thred=0)
-      x_ori_block3 = self.feature.forward_block3(x_adv_block2)
-      # calculate mean and std
-      feat_size_block3 = x_ori_block3.size()
-      ori_style_mean_block3, ori_style_std_block3 = calc_mean_std(x_ori_block3)
-      # set them as learnable parameters
-      ori_style_mean_block3  = torch.nn.Parameter(ori_style_mean_block3)
-      ori_style_std_block3 = torch.nn.Parameter(ori_style_std_block3)
-      ori_style_mean_block3.requires_grad_()
-      ori_style_std_block3.requires_grad_()
+          # Style transformation
+          x_normalized_block3 = (x_ori_block3 - ori_style_mean_block3.detach().expand(
+              feat_size_block3)) / ori_style_std_block3.detach().expand(feat_size_block3)
+          x_transformed_block3 = x_normalized_block3 * ori_style_std_block3.expand(
+              feat_size_block3) + ori_style_mean_block3.expand(feat_size_block3)
 
-      # Gram Matrix
-      ori_gram_block3 = compute_gram_matrix(x_ori_block3)
-      ori_gram_block3 = torch.nn.Parameter(ori_gram_block3)
-      ori_gram_block3.requires_grad_()
+          # Forward
+          x_block4 = self.feature.forward_block4(x_transformed_block3)
+          x_fea = self.feature.forward_rest(x_block4)
+          x_output = self.classifier.forward(x_fea)
 
-      # contain ori_style_mean_block3 in the graph 
-      x_normalized_block3 = (x_ori_block3 - ori_style_mean_block3.detach().expand(feat_size_block3)) / ori_style_std_block3.detach().expand(feat_size_block3)
-      x_ori_block3 = x_normalized_block3 * ori_style_std_block3.expand(feat_size_block3) + ori_style_mean_block3.expand(feat_size_block3)
-      # pass the rest model
-      x_ori_block4 = self.feature.forward_block4(x_ori_block3)
-      x_ori_fea = self.feature.forward_rest(x_ori_block4)
-      x_ori_output = self.classifier.forward(x_ori_fea)
-      # calculate initial pred, loss and acc
-      ori_pred = x_ori_output.max(1, keepdim=True)[1]
-      ori_loss = self.loss_fn(x_ori_output, y_ori)
-      ori_acc = (ori_pred == y_ori).type(torch.float).sum().item() / y_ori.size()[0]
-      current_gram = compute_gram_matrix(x_ori_block3)
-      gram_loss = F.mse_loss(current_gram, ori_gram_block3)
-      total_loss = ori_loss + lambda_gram * gram_loss
-      # zero all the existing gradients
-      self.feature.zero_grad()
-      self.classifier.zero_grad()
-      # backward loss
-      #ori_loss.backward()
-      total_loss.backward()
-      # collect datagrad
-      grad_ori_style_mean_block3 = ori_style_mean_block3.grad.detach()
-      grad_ori_style_std_block3 = ori_style_std_block3.grad.detach()
-      # fgsm style attack
-      index = torch.randint(0, len(epsilon_list), (1, ))[0]
-      epsilon = epsilon_list[index]
-      adv_style_mean_block3 = fgsm_attack(ori_style_mean_block3, epsilon, grad_ori_style_mean_block3)
-      adv_style_std_block3 = fgsm_attack(ori_style_std_block3, epsilon, grad_ori_style_std_block3)
+          # Loss
+          ori_pred = x_output.max(1, keepdim=True)[1]
+          ori_loss = self.loss_fn(x_output, y_ori)
+          ori_acc = (ori_pred == y_ori).type(torch.float).sum().item() / y_ori.size()[0]
 
-    return adv_style_mean_block1, adv_style_std_block1, adv_style_mean_block2, adv_style_std_block2, adv_style_mean_block3, adv_style_std_block3 
+          # Gram loss
+          if lambda_gram > 0:
+              transformed_gram_block3 = compute_gram_matrix(x_transformed_block3)
+              gram_loss = F.mse_loss(transformed_gram_block3, ori_gram_block3_ref)
+          else:
+              gram_loss = 0
+
+          # Total loss
+          if isinstance(gram_loss, int):
+              total_loss = ori_loss
+          else:
+              total_loss = ori_loss + lambda_gram * gram_loss
+
+          self.feature.zero_grad()
+          self.classifier.zero_grad()
+          total_loss.backward()
+
+          grad_ori_style_mean_block3 = ori_style_mean_block3.grad.detach()
+          grad_ori_style_std_block3 = ori_style_std_block3.grad.detach()
+
+          index = torch.randint(0, len(epsilon_list), (1,))[0]
+          epsilon = epsilon_list[index]
+          adv_style_mean_block3 = fgsm_attack(ori_style_mean_block3, epsilon, grad_ori_style_mean_block3)
+          adv_style_std_block3 = fgsm_attack(ori_style_std_block3, epsilon, grad_ori_style_std_block3)
+
+      return adv_style_mean_block1, adv_style_std_block1, adv_style_mean_block2, adv_style_std_block2, adv_style_mean_block3, adv_style_std_block3
     
   
   def set_statues_of_modules(self, flag):
