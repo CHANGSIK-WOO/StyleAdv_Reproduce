@@ -14,5 +14,6 @@
 set -euo pipefail
 
 echo "Starting Sbatch metatrain_StyleAdv_RN_5way_5shot"
-python3 metatrain_StyleAdv_RN.py --dataset miniImagenet --name exp-name --train_aug --warmup baseline --n_shot 5 --stop_epoch 200
+#python3 metatrain_StyleAdv_RN.py --dataset miniImagenet --name exp-name --train_aug --warmup baseline --n_shot 5 --stop_epoch 200
+python3 metatrain_StyleAdv_RN.py --dataset miniImagenet --name assignment_2_5WAY_5SHOTS --train_aug --warmup baseline --n_shot 5 --stop_epoch 200 --lambda_gram 0.5
 echo "Finish Sbatch metatrain_StyleAdv_RN_5way_5shot"

@@ -88,11 +88,12 @@ class StyleAdvGNN(MetaTemplate):
 
   def adversarial_attack_Incre(self, x_ori, y_ori, epsilon_list, lambda_gram=0.5):
       """
-      올바른 Gram Loss 구현:
-      1. Original feature의 Gram matrix 계산
-      2. Mean/std를 adversarially perturb
-      3. 변형된 feature의 Gram matrix 계산
-      4. 두 Gram의 차이를 loss로 사용
+      Fixed Gram Loss Implementation with Random Initialization
+
+      핵심:
+      1. Delta를 작은 랜덤 값으로 초기화 (0이 아님!)
+      2. Gram diversity를 maximize
+      3. Classification vs Diversity 충돌로 hard style 생성
       """
       x_ori = x_ori.cuda()
       y_ori = y_ori.cuda()
@@ -106,154 +107,199 @@ class StyleAdvGNN(MetaTemplate):
 
       blocklist = 'block123'
 
+      print(f"\n{'=' * 60}")
+      print(f"[adversarial_attack_Incre] lambda_gram={lambda_gram}")
+      print(f"{'=' * 60}")
+
       # ========================================
       # Block 1
       # ========================================
       if ('1' in blocklist and epsilon_list[0] != 0):
-          # Step 1: Forward original feature
+          print(f"\n[Block 1] Starting...")
+
           x_ori_block1 = self.feature.forward_block1(x_ori)
           feat_size_block1 = x_ori_block1.size()
+          print(f"[Block 1] Feature size: {feat_size_block1}")
 
-          # Step 2: 원본 feature의 Gram matrix (detached, gradient 안 받음)
           with torch.no_grad():
               ori_gram_block1_ref = compute_gram_matrix(x_ori_block1.detach())
 
-          # Step 3: Mean/Std를 learnable parameter로
-          ori_style_mean_block1, ori_style_std_block1 = calc_mean_std(x_ori_block1)
-          ori_style_mean_block1 = torch.nn.Parameter(ori_style_mean_block1)
-          ori_style_std_block1 = torch.nn.Parameter(ori_style_std_block1)
-          ori_style_mean_block1.requires_grad_()
-          ori_style_std_block1.requires_grad_()
+          ori_style_mean_fixed, ori_style_std_fixed = calc_mean_std(x_ori_block1)
+          ori_style_mean_fixed = ori_style_mean_fixed.detach()
+          ori_style_std_fixed = ori_style_std_fixed.detach()
+          print(f"[Block 1] Original mean (fixed): {ori_style_mean_fixed.mean().item():.6f}")
+          print(f"[Block 1] Original std (fixed): {ori_style_std_fixed.mean().item():.6f}")
 
-          # Step 4: Style transformation (mean/std 변경)
-          x_normalized_block1 = (x_ori_block1 - ori_style_mean_block1.detach().expand(
-              feat_size_block1)) / ori_style_std_block1.detach().expand(feat_size_block1)
+          delta_mean_block1 = torch.randn_like(ori_style_mean_fixed) * 0.01
+          delta_std_block1 = torch.randn_like(ori_style_std_fixed) * 0.01
+          delta_mean_block1 = torch.nn.Parameter(delta_mean_block1)
+          delta_std_block1 = torch.nn.Parameter(delta_std_block1)
+          delta_mean_block1.requires_grad_()
+          delta_std_block1.requires_grad_()
+
+          ori_style_mean_block1 = ori_style_mean_fixed + delta_mean_block1
+          ori_style_std_block1 = ori_style_std_fixed + delta_std_block1
+          print(f"[Block 1] Delta mean init: {delta_mean_block1.abs().mean().item():.6f}")
+          print(f"[Block 1] Delta std init: {delta_std_block1.abs().mean().item():.6f}")
+
+          x_normalized_block1 = (x_ori_block1 - ori_style_mean_fixed.expand(
+              feat_size_block1)) / ori_style_std_fixed.expand(feat_size_block1)
           x_transformed_block1 = x_normalized_block1 * ori_style_std_block1.expand(
               feat_size_block1) + ori_style_mean_block1.expand(feat_size_block1)
 
-          # Step 5: Forward transformed feature
+          print(f"[Block 1] Feature diff: {(x_ori_block1 - x_transformed_block1).abs().mean().item():.6f}")
+
           x_block2 = self.feature.forward_block2(x_transformed_block1)
           x_block3 = self.feature.forward_block3(x_block2)
           x_block4 = self.feature.forward_block4(x_block3)
           x_fea = self.feature.forward_rest(x_block4)
           x_output = self.classifier.forward(x_fea)
 
-          # Step 6: Classification loss
           ori_pred = x_output.max(1, keepdim=True)[1]
           ori_loss = self.loss_fn(x_output, y_ori)
           ori_acc = (ori_pred == y_ori).type(torch.float).sum().item() / y_ori.size()[0]
+          print(f"[Block 1] Classification loss: {ori_loss.item():.4f}, Acc: {ori_acc:.4f}")
 
-          # Step 7: Gram loss (transformed feature vs original feature)
           if lambda_gram > 0:
-              # 변형된 feature의 Gram matrix
               transformed_gram_block1 = compute_gram_matrix(x_transformed_block1)
+              gram_diversity = F.mse_loss(transformed_gram_block1, ori_gram_block1_ref)
+              print(f"[Block 1] Gram diversity: {gram_diversity.item():.6f}")
 
-              # 원본과 변형된 feature의 Gram 차이
-              # 목표: Style이 변하면 Gram도 변하도록 유도
-              gram_loss = F.mse_loss(transformed_gram_block1, ori_gram_block1_ref)
-              print(f"gram_loss in block 1: {gram_loss}")
-
-              # 또는 차이를 최대화하려면 (더 diverse한 style):
-              # gram_loss = -F.mse_loss(transformed_gram_block1, ori_gram_block1_ref)
+              gram_loss = -gram_diversity
+              print(f"[Block 1] Gram loss (negative): {gram_loss.item():.6f}")
           else:
               gram_loss = 0
+              print(f"[Block 1] Gram loss: DISABLED")
 
-          # Step 8: Total loss
           if isinstance(gram_loss, int):
               total_loss = ori_loss
+              print(f"[Block 1] Total loss: {total_loss.item():.4f} (no gram)")
           else:
               total_loss = ori_loss + lambda_gram * gram_loss
+              print(
+                  f"[Block 1] Total loss: {total_loss.item():.4f} = {ori_loss.item():.4f} + {lambda_gram}*({gram_loss.item():.6f})")
 
-          # Step 9: Backward
           self.feature.zero_grad()
           self.classifier.zero_grad()
           total_loss.backward()
 
-          # Step 10: Collect gradients
-          grad_ori_style_mean_block1 = ori_style_mean_block1.grad.detach()
-          grad_ori_style_std_block1 = ori_style_std_block1.grad.detach()
+          grad_delta_mean = delta_mean_block1.grad.detach()
+          grad_delta_std = delta_std_block1.grad.detach()
+          print(f"[Block 1] Delta mean gradient: {grad_delta_mean.abs().mean().item():.6f}")
+          print(f"[Block 1] Delta std gradient: {grad_delta_std.abs().mean().item():.6f}")
 
-          # Step 11: FGSM attack
           index = torch.randint(0, len(epsilon_list), (1,))[0]
           epsilon = epsilon_list[index]
-          adv_style_mean_block1 = fgsm_attack(ori_style_mean_block1, epsilon, grad_ori_style_mean_block1)
-          adv_style_std_block1 = fgsm_attack(ori_style_std_block1, epsilon, grad_ori_style_std_block1)
+
+          adv_style_mean_block1 = fgsm_attack(ori_style_mean_block1, epsilon, grad_delta_mean)
+          adv_style_std_block1 = fgsm_attack(ori_style_std_block1, epsilon, grad_delta_std)
+
+          mean_change = (adv_style_mean_block1 - ori_style_mean_fixed).abs().mean().item()
+          std_change = (adv_style_std_block1 - ori_style_std_fixed).abs().mean().item()
+          print(f"[Block 1] Adversarial change from original - Mean: {mean_change:.6f}, Std: {std_change:.6f}")
+          print(f"[Block 1] Epsilon: {epsilon}")
 
       self.feature.zero_grad()
       self.classifier.zero_grad()
 
       # ========================================
-      # Block 2 (동일한 패턴)
+      # Block 2
       # ========================================
       if ('2' in blocklist and epsilon_list[1] != 0):
-          # Forward with adversarial style from block1
+          print(f"\n[Block 2] Starting...")
+
           x_ori_block1 = self.feature.forward_block1(x_ori)
           x_adv_block1 = changeNewAdvStyle(x_ori_block1, adv_style_mean_block1, adv_style_std_block1, p_thred=0)
 
           x_ori_block2 = self.feature.forward_block2(x_adv_block1)
           feat_size_block2 = x_ori_block2.size()
+          print(f"[Block 2] Feature size: {feat_size_block2}")
 
-          # Original Gram (reference)
           with torch.no_grad():
               ori_gram_block2_ref = compute_gram_matrix(x_ori_block2.detach())
 
-          # Mean/Std parameters
-          ori_style_mean_block2, ori_style_std_block2 = calc_mean_std(x_ori_block2)
-          ori_style_mean_block2 = torch.nn.Parameter(ori_style_mean_block2)
-          ori_style_std_block2 = torch.nn.Parameter(ori_style_std_block2)
-          ori_style_mean_block2.requires_grad_()
-          ori_style_std_block2.requires_grad_()
+          ori_style_mean_fixed, ori_style_std_fixed = calc_mean_std(x_ori_block2)
+          ori_style_mean_fixed = ori_style_mean_fixed.detach()
+          ori_style_std_fixed = ori_style_std_fixed.detach()
+          print(f"[Block 2] Original mean (fixed): {ori_style_mean_fixed.mean().item():.6f}")
+          print(f"[Block 2] Original std (fixed): {ori_style_std_fixed.mean().item():.6f}")
 
-          # Style transformation
-          x_normalized_block2 = (x_ori_block2 - ori_style_mean_block2.detach().expand(
-              feat_size_block2)) / ori_style_std_block2.detach().expand(feat_size_block2)
+          delta_mean_block2 = torch.randn_like(ori_style_mean_fixed) * 0.01
+          delta_std_block2 = torch.randn_like(ori_style_std_fixed) * 0.01
+          delta_mean_block2 = torch.nn.Parameter(delta_mean_block2)
+          delta_std_block2 = torch.nn.Parameter(delta_std_block2)
+          delta_mean_block2.requires_grad_()
+          delta_std_block2.requires_grad_()
+
+          ori_style_mean_block2 = ori_style_mean_fixed + delta_mean_block2
+          ori_style_std_block2 = ori_style_std_fixed + delta_std_block2
+          print(f"[Block 2] Delta mean init: {delta_mean_block2.abs().mean().item():.6f}")
+          print(f"[Block 2] Delta std init: {delta_std_block2.abs().mean().item():.6f}")
+
+          x_normalized_block2 = (x_ori_block2 - ori_style_mean_fixed.expand(
+              feat_size_block2)) / ori_style_std_fixed.expand(feat_size_block2)
           x_transformed_block2 = x_normalized_block2 * ori_style_std_block2.expand(
               feat_size_block2) + ori_style_mean_block2.expand(feat_size_block2)
 
-          # Forward
+          print(f"[Block 2] Feature diff: {(x_ori_block2 - x_transformed_block2).abs().mean().item():.6f}")
+
           x_block3 = self.feature.forward_block3(x_transformed_block2)
           x_block4 = self.feature.forward_block4(x_block3)
           x_fea = self.feature.forward_rest(x_block4)
           x_output = self.classifier.forward(x_fea)
 
-          # Loss
           ori_pred = x_output.max(1, keepdim=True)[1]
           ori_loss = self.loss_fn(x_output, y_ori)
           ori_acc = (ori_pred == y_ori).type(torch.float).sum().item() / y_ori.size()[0]
+          print(f"[Block 2] Classification loss: {ori_loss.item():.4f}, Acc: {ori_acc:.4f}")
 
-          # Gram loss
           if lambda_gram > 0:
               transformed_gram_block2 = compute_gram_matrix(x_transformed_block2)
-              gram_loss = F.mse_loss(transformed_gram_block2, ori_gram_block2_ref)
+              gram_diversity = F.mse_loss(transformed_gram_block2, ori_gram_block2_ref)
+              print(f"[Block 2] Gram diversity: {gram_diversity.item():.6f}")
+
+              gram_loss = -gram_diversity
+              print(f"[Block 2] Gram loss (negative): {gram_loss.item():.6f}")
           else:
               gram_loss = 0
+              print(f"[Block 2] Gram loss: DISABLED")
 
-          # Total loss
           if isinstance(gram_loss, int):
               total_loss = ori_loss
+              print(f"[Block 2] Total loss: {total_loss.item():.4f} (no gram)")
           else:
               total_loss = ori_loss + lambda_gram * gram_loss
+              print(
+                  f"[Block 2] Total loss: {total_loss.item():.4f} = {ori_loss.item():.4f} + {lambda_gram}*({gram_loss.item():.6f})")
 
           self.feature.zero_grad()
           self.classifier.zero_grad()
           total_loss.backward()
 
-          grad_ori_style_mean_block2 = ori_style_mean_block2.grad.detach()
-          grad_ori_style_std_block2 = ori_style_std_block2.grad.detach()
+          grad_delta_mean = delta_mean_block2.grad.detach()
+          grad_delta_std = delta_std_block2.grad.detach()
+          print(f"[Block 2] Delta mean gradient: {grad_delta_mean.abs().mean().item():.6f}")
+          print(f"[Block 2] Delta std gradient: {grad_delta_std.abs().mean().item():.6f}")
 
           index = torch.randint(0, len(epsilon_list), (1,))[0]
           epsilon = epsilon_list[index]
-          adv_style_mean_block2 = fgsm_attack(ori_style_mean_block2, epsilon, grad_ori_style_mean_block2)
-          adv_style_std_block2 = fgsm_attack(ori_style_std_block2, epsilon, grad_ori_style_std_block2)
+
+          adv_style_mean_block2 = fgsm_attack(ori_style_mean_block2, epsilon, grad_delta_mean)
+          adv_style_std_block2 = fgsm_attack(ori_style_std_block2, epsilon, grad_delta_std)
+
+          mean_change = (adv_style_mean_block2 - ori_style_mean_fixed).abs().mean().item()
+          std_change = (adv_style_std_block2 - ori_style_std_fixed).abs().mean().item()
+          print(f"[Block 2] Adversarial change from original - Mean: {mean_change:.6f}, Std: {std_change:.6f}")
 
       self.feature.zero_grad()
       self.classifier.zero_grad()
 
       # ========================================
-      # Block 3 (동일한 패턴)
+      # Block 3
       # ========================================
       if ('3' in blocklist and epsilon_list[2] != 0):
-          # Forward with adversarial styles from block1, block2
+          print(f"\n[Block 3] Starting...")
+
           x_ori_block1 = self.feature.forward_block1(x_ori)
           x_adv_block1 = changeNewAdvStyle(x_ori_block1, adv_style_mean_block1, adv_style_std_block1, p_thred=0)
           x_ori_block2 = self.feature.forward_block2(x_adv_block1)
@@ -261,58 +307,86 @@ class StyleAdvGNN(MetaTemplate):
 
           x_ori_block3 = self.feature.forward_block3(x_adv_block2)
           feat_size_block3 = x_ori_block3.size()
+          print(f"[Block 3] Feature size: {feat_size_block3}")
 
-          # Original Gram (reference)
           with torch.no_grad():
               ori_gram_block3_ref = compute_gram_matrix(x_ori_block3.detach())
 
-          # Mean/Std parameters
-          ori_style_mean_block3, ori_style_std_block3 = calc_mean_std(x_ori_block3)
-          ori_style_mean_block3 = torch.nn.Parameter(ori_style_mean_block3)
-          ori_style_std_block3 = torch.nn.Parameter(ori_style_std_block3)
-          ori_style_mean_block3.requires_grad_()
-          ori_style_std_block3.requires_grad_()
+          ori_style_mean_fixed, ori_style_std_fixed = calc_mean_std(x_ori_block3)
+          ori_style_mean_fixed = ori_style_mean_fixed.detach()
+          ori_style_std_fixed = ori_style_std_fixed.detach()
+          print(f"[Block 3] Original mean (fixed): {ori_style_mean_fixed.mean().item():.6f}")
+          print(f"[Block 3] Original std (fixed): {ori_style_std_fixed.mean().item():.6f}")
 
-          # Style transformation
-          x_normalized_block3 = (x_ori_block3 - ori_style_mean_block3.detach().expand(
-              feat_size_block3)) / ori_style_std_block3.detach().expand(feat_size_block3)
+          delta_mean_block3 = torch.randn_like(ori_style_mean_fixed) * 0.01
+          delta_std_block3 = torch.randn_like(ori_style_std_fixed) * 0.01
+          delta_mean_block3 = torch.nn.Parameter(delta_mean_block3)
+          delta_std_block3 = torch.nn.Parameter(delta_std_block3)
+          delta_mean_block3.requires_grad_()
+          delta_std_block3.requires_grad_()
+
+          ori_style_mean_block3 = ori_style_mean_fixed + delta_mean_block3
+          ori_style_std_block3 = ori_style_std_fixed + delta_std_block3
+          print(f"[Block 3] Delta mean init: {delta_mean_block3.abs().mean().item():.6f}")
+          print(f"[Block 3] Delta std init: {delta_std_block3.abs().mean().item():.6f}")
+
+          x_normalized_block3 = (x_ori_block3 - ori_style_mean_fixed.expand(
+              feat_size_block3)) / ori_style_std_fixed.expand(feat_size_block3)
           x_transformed_block3 = x_normalized_block3 * ori_style_std_block3.expand(
               feat_size_block3) + ori_style_mean_block3.expand(feat_size_block3)
 
-          # Forward
+          print(f"[Block 3] Feature diff: {(x_ori_block3 - x_transformed_block3).abs().mean().item():.6f}")
+
           x_block4 = self.feature.forward_block4(x_transformed_block3)
           x_fea = self.feature.forward_rest(x_block4)
           x_output = self.classifier.forward(x_fea)
 
-          # Loss
           ori_pred = x_output.max(1, keepdim=True)[1]
           ori_loss = self.loss_fn(x_output, y_ori)
           ori_acc = (ori_pred == y_ori).type(torch.float).sum().item() / y_ori.size()[0]
+          print(f"[Block 3] Classification loss: {ori_loss.item():.4f}, Acc: {ori_acc:.4f}")
 
-          # Gram loss
           if lambda_gram > 0:
               transformed_gram_block3 = compute_gram_matrix(x_transformed_block3)
-              gram_loss = F.mse_loss(transformed_gram_block3, ori_gram_block3_ref)
+              gram_diversity = F.mse_loss(transformed_gram_block3, ori_gram_block3_ref)
+              print(f"[Block 3] Gram diversity: {gram_diversity.item():.6f}")
+
+              gram_loss = -gram_diversity
+              print(f"[Block 3] Gram loss (negative): {gram_loss.item():.6f}")
           else:
               gram_loss = 0
+              print(f"[Block 3] Gram loss: DISABLED")
 
-          # Total loss
           if isinstance(gram_loss, int):
               total_loss = ori_loss
+              print(f"[Block 3] Total loss: {total_loss.item():.4f} (no gram)")
           else:
               total_loss = ori_loss + lambda_gram * gram_loss
+              print(
+                  f"[Block 3] Total loss: {total_loss.item():.4f} = {ori_loss.item():.4f} + {lambda_gram}*({gram_loss.item():.6f})")
 
           self.feature.zero_grad()
           self.classifier.zero_grad()
           total_loss.backward()
 
-          grad_ori_style_mean_block3 = ori_style_mean_block3.grad.detach()
-          grad_ori_style_std_block3 = ori_style_std_block3.grad.detach()
+          grad_delta_mean = delta_mean_block3.grad.detach()
+          grad_delta_std = delta_std_block3.grad.detach()
+          print(f"[Block 3] Delta mean gradient: {grad_delta_mean.abs().mean().item():.6f}")
+          print(f"[Block 3] Delta std gradient: {grad_delta_std.abs().mean().item():.6f}")
 
           index = torch.randint(0, len(epsilon_list), (1,))[0]
           epsilon = epsilon_list[index]
-          adv_style_mean_block3 = fgsm_attack(ori_style_mean_block3, epsilon, grad_ori_style_mean_block3)
-          adv_style_std_block3 = fgsm_attack(ori_style_std_block3, epsilon, grad_ori_style_std_block3)
+
+          adv_style_mean_block3 = fgsm_attack(ori_style_mean_block3, epsilon, grad_delta_mean)
+          adv_style_std_block3 = fgsm_attack(ori_style_std_block3, epsilon, grad_delta_std)
+
+          mean_change = (adv_style_mean_block3 - ori_style_mean_fixed).abs().mean().item()
+          std_change = (adv_style_std_block3 - ori_style_std_fixed).abs().mean().item()
+          print(f"[Block 3] Adversarial change from original - Mean: {mean_change:.6f}, Std: {std_change:.6f}")
+
+      print(f"\n{'=' * 60}")
+      print(f"[adversarial_attack_Incre] Completed!")
+      print(f"{'=' * 60}\n")
 
       return adv_style_mean_block1, adv_style_std_block1, adv_style_mean_block2, adv_style_std_block2, adv_style_mean_block3, adv_style_std_block3
     

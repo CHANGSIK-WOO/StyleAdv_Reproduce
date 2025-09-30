@@ -26,7 +26,7 @@ def compute_gram_matrix(feat, eps=1e-5):
     B, C, H, W = feat.size()
     feat_flat = feat.view(B, C, -1)
     gram = torch.bmm(feat_flat, feat_flat.transpose(1, 2))
-    gram = gram / (C * H * W + eps)
+    gram = gram / (H * W + eps)
     return gram
 
 def fgsm_attack(init_input, epsilon, data_grad):
